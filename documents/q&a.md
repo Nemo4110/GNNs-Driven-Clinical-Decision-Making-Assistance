@@ -10,7 +10,7 @@
 
 ## Choice 2: using `torch.nn.TransformerDecoder`?
 
-**Yes!**
+**Yes!**:yum:
 
 1. Using a Heterogeneous GNN to get `node_feat` of each subgraph (spilted by timestep, packed as mini-batch)
 2. Using `torch.nn.TransformerDecoder` with `mask` to apply self-attention mechanism on each node's `node_feat` over timesteps!
@@ -63,7 +63,7 @@ Not surprisingly, we can find the calculate of score can be parallel by using ma
   - $m$: the total number of item nodes
   - $e_{i_j}$: the embedding of $i$-th item
 
-Finally, we get the score matrix $s \in R^{n \times m}$ by:
+:yum:Finally, we get the score matrix $s \in R^{n \times m}$ by:
 
 $$
 s = H_u^TW_pE_i = 
@@ -109,6 +109,8 @@ The reason why it's incompatible is that the edges in different timesteps may re
 - admission $A_1$ may do labtiems $(L_1, L_2, L_3, L_4)$ at timestep $t_1$!
 
 So, during admission $A_1$'s time sequence $T^u = (t_1, t_2, \dots)$, labitems sequence $S^l = (l_1, l_2, \dots)$ is NOT UNIQUE!
+
+---
 
 # NODES NUMBER DON'T NEED TO BE FIX!
 
@@ -280,10 +282,3 @@ In *Link Prediction on MovieLens* project, we saw the author using `nn.Embedding
 self.user_emb = torch.nn.Embedding(data["user"]num_nodes, hidden_channels)
 self.movie_emb = torch.nn.Embedding(data["movie"]num_nodes, hidden_channels)
 ```
-
-Just because I mistook the shape arg:
-
-- Wrong: `shape=(scores.shape[0], scores.shape[1]))`
-- Right: `shape=(scores.shape[-2], scores.shape[-1]))`
-
-As the scores tensor has shape of `[20, 128, 753]`
