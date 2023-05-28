@@ -1,0 +1,8 @@
+checkpoints/
+.idea/
+mimic-iii-hgs/
+
+*.gitignore
+*.whl
+*.pptx
+*.png

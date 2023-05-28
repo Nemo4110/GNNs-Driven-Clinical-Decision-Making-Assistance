@@ -1,6 +1,5 @@
 import argparse
 import os
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -10,6 +9,7 @@ from sklearn.metrics import roc_auc_score
 
 from dataset.hgs import MyOwnDataset
 from model.lers import LERS
+from utils.plot import Ploter
 
 
 if __name__ == '__main__':
@@ -59,6 +59,9 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     # with torch.autograd.detect_anomaly():
+    ploter = Ploter(xlabel="Epoch", 
+                    legends=["loss", "auc"], 
+                    fmts=["m-", "g-."])
     t_loop = tqdm(range(args.epochs))
     for epoch in t_loop:
         model.train()
@@ -94,4 +97,9 @@ if __name__ == '__main__':
         train_loss = metric_train[1] / metric_train[0]
         avg_auc = metric_val[1] / metric_val[0]
 
+        ploter.add_point(epoch, (train_loss, avg_auc))
         t_loop.set_postfix_str(f'\033[32m Training Loss: {train_loss:.4f}, Validation AUC: {avg_auc:.4f} \033[0m')
+
+    str_prefix = f"max_timestep={args.max_timestep}_batch_size_by_HADMID={args.batch_size_by_HADMID}_gnn_type={args.gnn_type}"
+    ploter.plotting(description=str_prefix)
+    torch.save(model.state_dict(), f"auc={avg_auc:.4f}_{str_prefix}.pt")

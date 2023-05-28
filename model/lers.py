@@ -10,6 +10,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
 from torch_geometric.nn import to_hetero
 from dataset.hgs import MyOwnDataset
+from model.position_encoding import PositionalEncoding
 
 
 class SingelGnn(nn.Module):
@@ -101,6 +102,8 @@ class LERS(nn.Module):
         # self.admission_embedding = nn.Embedding(self.num_admissions, self.hidden_dim)
         self.labitem_embedding = nn.Embedding(self.num_labitems, self.hidden_dim)
 
+        self.position_encoding = PositionalEncoding(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep)
+
         self.proj_admission = nn.Linear(in_features=8, out_features=self.hidden_dim)
         self.proj_labitem = nn.Linear(in_features=2, out_features=self.hidden_dim)
         self.proj_edge_attr = nn.Linear(in_features=2, out_features=self.hidden_dim)
@@ -134,6 +137,10 @@ class LERS(nn.Module):
 
         admission_node_feats = torch.stack([dict_node_feats['admission'] for dict_node_feats in list_dict_node_feats])
         labitem_node_feats = torch.stack([dict_node_feats['labitem'] for dict_node_feats in list_dict_node_feats])
+
+        # Add position encoding:
+        admission_node_feats = self.position_encoding(admission_node_feats)
+        labitem_node_feats = self.position_encoding(labitem_node_feats)
 
         device = admission_node_feats.device
         tgt_mask = memory_mask = nn.Transformer.generate_square_subsequent_mask(self.max_timestep).to(device)
