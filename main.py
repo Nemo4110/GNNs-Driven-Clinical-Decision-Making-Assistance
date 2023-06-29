@@ -10,6 +10,7 @@ from sklearn.metrics import roc_auc_score
 from dataset.hgs import MyOwnDataset
 from model.lers import LERS
 from utils.plot import Ploter
+from utils.gird import GridOfRessults
 
 
 if __name__ == '__main__':
@@ -18,6 +19,7 @@ if __name__ == '__main__':
     # ********* Hyperparams ********* #
 
     # following arguments are model settings
+    # NOTE: when max_timestep set to 30 or 50, would trigger the assert error "last timestep has not labels!" in `get_subgraph_by_timestep` in lers.py
     parser.add_argument("--max_timestep", type=int, default=20, help="The maximum `TIMESTEP`")
     parser.add_argument("--gnn_type", default="GINEConv",help="Specify the `conv` that being used as MessagePassing")
     parser.add_argument("--num_decoder_layers_admission", type=int, default=6, help="Number of decoder layers for admission")
@@ -30,7 +32,6 @@ if __name__ == '__main__':
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--val", action="store_true", default=True, help="specify whether do validating")
     parser.add_argument("--root_path_dataset", default=r"../datasets/mimic-iii-hgs", help="path where dataset directory locates")  # in linux
-    # parser.add_argument("--root_path_dataset", default=r"dataset/mimic-iii-hgs", help="path where dataset directory locates")  # in linux
     # parser.add_argument("--root_path_dataset", default=r"dataset\mimic-iii-hgs", help="path where dataset directory locates")  # in windows
     parser.add_argument("--batch_size_by_HADMID", type=int, default=512, help="specified the batch size that will be used for splitting the dataset by HADM_ID")
     parser.add_argument("--use_gpu", action="store_true", default=True, help="specify whether to use GPU")
@@ -50,18 +51,22 @@ if __name__ == '__main__':
     train_set = MyOwnDataset(root_path=root_path, usage="train")
     val_set = MyOwnDataset(root_path=root_path, usage="val") if args.val else None
 
+    # model
     model = LERS(max_timestep=args.max_timestep,
                  gnn_type=args.gnn_type,
                  num_decoder_layers_admission=args.num_decoder_layers_admission,
                  num_decoder_layers_labitem=args.num_decoder_layers_labitem,
                  hidden_dim=args.hidden_dim).to(device)
 
+    # optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     # with torch.autograd.detect_anomaly():
     ploter = Ploter(xlabel="Epoch", 
                     legends=["loss", "auc"], 
                     fmts=["m-", "g-."])
+    gird = GridOfRessults(max_timestep=args.max_timestep)
+
     t_loop = tqdm(range(args.epochs))
     for epoch in t_loop:
         model.train()
@@ -88,6 +93,7 @@ if __name__ == '__main__':
                 for hg in t_loop_val_set:
                     hg = hg.to(device)
                     scores, labels = model(hg)
+                    gird.add_batch_result_per_timestep(scores, labels)
                     scores = torch.flatten(scores, start_dim=0).cpu().numpy()
                     labels = torch.flatten(labels, start_dim=0).cpu().numpy()
                     auc = roc_auc_score(labels, scores)
@@ -100,6 +106,12 @@ if __name__ == '__main__':
         ploter.add_point(epoch, (train_loss, avg_auc))
         t_loop.set_postfix_str(f'\033[32m Training Loss: {train_loss:.4f}, Validation AUC: {avg_auc:.4f} \033[0m')
 
-    str_prefix = f"max_timestep={args.max_timestep}_batch_size_by_HADMID={args.batch_size_by_HADMID}_gnn_type={args.gnn_type}"
+    pth_pts = os.path.join(".", "model", "hub")
+    pth_res = os.path.join(".", "results", "dfs")
+    os.mkdir(pth_pts) if not os.path.exists(pth_pts) else None
+    os.mkdir(pth_res) if not os.path.exists(pth_res) else None
+
+    str_prefix = f"gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
     ploter.plotting(description=str_prefix)
-    torch.save(model.state_dict(), f"auc={avg_auc:.4f}_{str_prefix}.pt")
+    gird.save_results(pth=pth_res, description=str_prefix)
+    torch.save(model.state_dict(), os.path.join(pth_pts, f"{str_prefix}_auc={avg_auc:.4f}_f1={gird.df.f1.mean():.4f}.pt"))

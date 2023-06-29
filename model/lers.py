@@ -199,7 +199,7 @@ class LERS(nn.Module):
         return sub_hg
 
     @staticmethod
-    def to_dense_adj(edge_index: torch.tensor, shape: (int, int)):
+    def to_dense_adj(edge_index: torch.tensor, shape):
         # here must ensure all tensor be on same device
         dense_adj = torch.zeros(shape[0], shape[1], dtype=torch.float, device=edge_index.device)
 

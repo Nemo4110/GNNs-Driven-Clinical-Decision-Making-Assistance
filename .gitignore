@@ -1,8 +1,11 @@
 checkpoints/
 .idea/
 mimic-iii-hgs/
+documents/overleaf_pictures/
 
 *.gitignore
 *.whl
 *.pptx
 *.png
+*.pt
+*.drawio

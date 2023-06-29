@@ -97,17 +97,41 @@ def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
         mask = (data < up) & (data > low)
         return mask
 
+    def three_theta(data: pd.Series):
+        assert len(data) > 1
+
+        std = data.std()
+        mean = data.mean()
+
+        up_bound = mean + 3 * std
+        low_bound = mean - 3 * std
+
+        mask = (data > low_bound) & (data < up_bound)
+        return mask
+
     def z_score_4_value_type_labitem(df_grp):
         dfx = df_grp.copy()
-        dfx_normal = dfx[dfx.FLAG != 'abnormal']
+        dfx_normal = dfx[dfx.FLAG.isnull()]
 
-        mask = box_analysis(dfx_normal.VALUENUM)  # using box analysis filter out abnormal value whose FLAG != 'abnormal'
-        dfx_normal_boxed = dfx_normal.loc[mask, :]
-
-        mean = dfx_normal_boxed.VALUENUM.mean()
-        std = dfx_normal_boxed.VALUENUM.std()
-
-        dfx['VALUENUM_Z-SCORED'] = dfx['VALUENUM'].apply(lambda x: (x - mean) / (std + 1e-7))  # avoid division by zero
+        if len(dfx_normal) > 1:
+            mask = three_theta(dfx_normal.VALUENUM)
+            dfx_normal_filted = dfx_normal.loc[mask, :]
+            if len(dfx_normal_filted) > 1:
+                mean = dfx_normal_filted.VALUENUM.mean()
+                std = dfx_normal_filted.VALUENUM.std() + 1e-7
+            elif len(dfx_normal_filted) == 1:
+                mean = dfx_normal_filted.VALUENUM.mean()
+                std = dfx_normal_filted.VALUENUM.std(ddof=0) + 1e-7
+            else:  # meaning that the normal entries have same values 0
+                mean = 0
+                std = 0 + 1e-7
+            dfx['VALUENUM_Z-SCORED'] = dfx['VALUENUM'].apply(lambda x: (x - mean) / std)
+        elif len(dfx_normal) == 1:
+            mean = dfx_normal.VALUENUM.mean()
+            std = dfx_normal.VALUENUM.std(ddof=0) + 1e-7
+            dfx['VALUENUM_Z-SCORED'] = dfx['VALUENUM'].apply(lambda x: (x - mean) / std)
+        else:  # 0, meaning all enties' FLAG="abnormal"
+            dfx['VALUENUM_Z-SCORED'] = 3  # 3 or -3? worth discussing, but here set to 3 for convenience.
 
         return dfx
 

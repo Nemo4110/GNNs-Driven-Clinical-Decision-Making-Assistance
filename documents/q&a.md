@@ -282,3 +282,13 @@ In *Link Prediction on MovieLens* project, we saw the author using `nn.Embedding
 self.user_emb = torch.nn.Embedding(data["user"]num_nodes, hidden_channels)
 self.movie_emb = torch.nn.Embedding(data["movie"]num_nodes, hidden_channels)
 ```
+
+---
+
+# About evaluation
+
+## How does ROC been producted
+
+## AUC or F1
+
+## Optimal threshold choose
