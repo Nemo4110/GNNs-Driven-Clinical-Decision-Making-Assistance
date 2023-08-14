@@ -37,6 +37,8 @@ if __name__ == '__main__':
     parser.add_argument("--use_gpu", action="store_true", default=True, help="specify whether to use GPU")
     parser.add_argument("--num_gpu", type=int, default=0, help="specify which GPU to be used firstly")
     parser.add_argument("--record_metrics", action="store_true", default=True, help="specify whether to record metrics")
+    parser.add_argument("--top50_items", action="store_true", default=False, help="specify whether to analyze the top50 items individually")
+    parser.add_argument("--plot_training_curve", action="store_true", default=False, help="specify whether to plot the training curve")
 
     args = parser.parse_args()
     # print(args)
@@ -62,10 +64,19 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     # with torch.autograd.detect_anomaly():
-    ploter = Ploter(xlabel="Epoch", 
-                    legends=["loss", "auc"], 
-                    fmts=["m-", "g-."])
+
+    if args.plot_training_curve:
+        ploter = Ploter(xlabel="Epoch", legends=["loss", "auc"], fmts=["m-", "g-."])
+
     gird = GridOfRessults(max_timestep=args.max_timestep)
+    if args.top50_items:
+        gird_top50 = GridOfRessults(max_timestep=args.max_timestep)
+        # confirmed in "statistics.ipynb"
+        indices = torch.tensor([0, 2, 4, 8, 9, 12, 13, 16, 17, 18, 
+                                19, 20, 21, 22, 25, 61, 62, 63, 68, 78, 
+                                82, 85, 93, 102, 110, 111, 112, 131, 160, 170, 
+                                171, 183, 205, 345, 399, 420, 421, 436, 443, 447, 
+                                448, 449, 453, 455, 464, 473, 474, 476, 478, 500]).to(device)
 
     t_loop = tqdm(range(args.epochs))
     for epoch in t_loop:
@@ -93,7 +104,12 @@ if __name__ == '__main__':
                 for hg in t_loop_val_set:
                     hg = hg.to(device)
                     scores, labels = model(hg)
+
                     gird.add_batch_result_per_timestep(scores, labels)
+                    if gird_top50 is not None:
+                        gird_top50.add_batch_result_per_timestep(torch.index_select(scores, 2, indices), 
+                                                                 torch.index_select(labels, 2, indices))
+                        
                     scores = torch.flatten(scores, start_dim=0).cpu().numpy()
                     labels = torch.flatten(labels, start_dim=0).cpu().numpy()
                     auc = roc_auc_score(labels, scores)
@@ -103,7 +119,9 @@ if __name__ == '__main__':
         train_loss = metric_train[1] / metric_train[0]
         avg_auc = metric_val[1] / metric_val[0]
 
-        ploter.add_point(epoch, (train_loss, avg_auc))
+        if args.plot_training_curve:
+            ploter.add_point(epoch, (train_loss, avg_auc))
+
         t_loop.set_postfix_str(f'\033[32m Training Loss: {train_loss:.4f}, Validation AUC: {avg_auc:.4f} \033[0m')
 
     pth_pts = os.path.join(".", "model", "hub")
@@ -112,6 +130,12 @@ if __name__ == '__main__':
     os.mkdir(pth_res) if not os.path.exists(pth_res) else None
 
     str_prefix = f"gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-    ploter.plotting(description=str_prefix)
+
+    if args.plot_training_curve:
+        ploter.plotting(description=str_prefix)
+
     gird.save_results(pth=pth_res, description=str_prefix)
-    torch.save(model.state_dict(), os.path.join(pth_pts, f"{str_prefix}_auc={avg_auc:.4f}_f1={gird.df.f1.mean():.4f}.pt"))
+    if args.top50_items:
+        gird_top50.save_results(pth=pth_res, description="top50_items_"+str_prefix)
+
+    torch.save(model.state_dict(), os.path.join(pth_pts, f"{str_prefix}_auc={avg_auc:.4f}.pt"))

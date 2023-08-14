@@ -181,7 +181,7 @@ class LERS(nn.Module):
 
         sub_hg = T.ToUndirected()(sub_hg)
 
-        assert timestep < torch.max(hg["admission", "did", "labitem"].timestep), "last timestep has not labels!"
+        assert timestep < torch.max(hg["admission", "did", "labitem"].timestep), "last timestep has not labels!"  # This restriction can be relaxed in future work
         mask_next_t = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
         sub_hg.labels = hg["admission", "did", "labitem"].edge_index[:, mask_next_t].clone()
 
