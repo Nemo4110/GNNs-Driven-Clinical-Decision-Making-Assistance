@@ -1,3 +1,7 @@
+r"""
+A separate script for preprocessing data, same function as `processes.ipynb`.
+"""
+
 import os.path as path
 import numpy as np
 import pandas as pd
@@ -43,6 +47,7 @@ def preprocess_labitems(src_csv_path, dst_csv_path, value_na=0):
         m = pd.Series(index=m.index, data=range(1, len(m) + 1))
         df_d_labitems[c] = df_d_labitems[c].map(m)
 
+    # In fact, there is none nan in this 2 columns, so following code can be ignored.
     values_fillna = {}
     for c in list_str_type_columns:
         values_fillna[c] = value_na
@@ -86,7 +91,8 @@ def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
     # **************************************************************************************************************** #
     print("*** Z-SCORE ***")
     def box_analysis(data: pd.Series):
-        # via. [利用 Pandas 进行数据处理](https://juejin.cn/post/6859254388021133326#heading-0)
+        # Warning: deprecated due to bug!!!
+        # via. <https://juejin.cn/post/6859254388021133326#heading-0>
         qu = data.quantile(q=0.75)
         ql = data.quantile(q=0.25)
 

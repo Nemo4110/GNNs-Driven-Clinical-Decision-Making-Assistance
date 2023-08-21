@@ -37,13 +37,6 @@ class SingelGnn(nn.Module):
 
 
 class MultiGnns(nn.Module):
-    r"""
-
-    Args:
-        hidden_dim:
-        max_timestep:
-        dropout_rate:
-    """
     def __init__(self,
                  hidden_dim: int,
                  max_timestep: int,
@@ -73,10 +66,6 @@ class MultiGnns(nn.Module):
 
 
 class LERS(nn.Module):
-    r"""
-
-    Args:
-    """
     def __init__(self,
                  max_timestep: int,
                  gnn_type: str,

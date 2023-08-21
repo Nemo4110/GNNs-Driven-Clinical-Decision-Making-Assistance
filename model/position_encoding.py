@@ -5,7 +5,7 @@ import math
 
 class PositionalEncoding(nn.Module):
     r"""
-
+        Add position encoding information for each timestep.
     Refs:
         - <https://jalammar.github.io/illustrated-transformer/>
         - <https://zhuanlan.zhihu.com/p/338592312>
@@ -17,8 +17,10 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_timestep, hidden_dim)
 
         position = torch.arange(0, max_timestep, dtype=torch.float).unsqueeze(1)  # [max_timestep, 1]
+
+        # *** the temperature modefied due to the experiment result of DAB-DETR ***
         # div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
-        div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(20.0) / hidden_dim))  # modefied because the temperature experiment of DAB-DETR
+        div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(20.0) / hidden_dim))  
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
