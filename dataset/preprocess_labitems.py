@@ -56,12 +56,17 @@ def preprocess_labitems(src_csv_path, dst_csv_path, value_na=0):
     df_d_labitems.to_csv(dst_csv_path)
 
 
-def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
+def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na=0):
+    # read csv files
     df_labevents = pd.read_csv(src_csv_path)
     df_labevents.dropna(subset=['HADM_ID', 'ITEMID'], inplace=True)
     df_labevents.sort_values(by=["HADM_ID", "ITEMID"], inplace=True)
     df_labevents["CHARTTIME"] = pd.to_datetime(df_labevents["CHARTTIME"], format="%Y-%m-%d %H:%M:%S")
+    df_admissions = pd.read_csv(src_csv_path_admi)
+    df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
+    df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
 
+    # group by ITEMID
     grouped_by_itemid_value_type_only = df_labevents[df_labevents.VALUENUM.notnull()].groupby("ITEMID")
     grouped_by_itemid_not_value_type = df_labevents[df_labevents.VALUENUM.isnull()].groupby("ITEMID")
 
@@ -152,13 +157,17 @@ def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
         interval_hour = 24  # chosen interval
         df_grouped_by_hadmid = df_grouped_by_hadmid.sort_values(by="CHARTTIME")
 
-        st = df_grouped_by_hadmid.CHARTTIME.iloc[0]  # st <- start time
+        hadm_id = df_grouped_by_hadmid.HADM_ID.unique()[0]
+        st = df_admissions[df_admissions.HADM_ID == hadm_id].ADMITTIME.iloc[0]
         et = df_grouped_by_hadmid.CHARTTIME.iloc[-1]  # et <- end time
+
         st = datetime.strptime(f"{st.year}-{st.month}-{st.day} {st.hour // interval_hour * interval_hour:2}:00:00", "%Y-%m-%d %H:%M:%S")
         et = datetime.strptime(f"{et.year}-{et.month}-{et.day} {(((et.hour // interval_hour) + 1) * interval_hour) - 1:2}:59:59", "%Y-%m-%d %H:%M:%S")
+
         interval = timedelta(hours=interval_hour)
 
         dfx = df_grouped_by_hadmid.copy()
+        dfx = dfx[dfx.CHARTTIME >= st]
         dfx.insert(len(dfx.columns), "TIMESTEP", np.NaN)
 
         timestep = 0
@@ -166,13 +175,15 @@ def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
             mask = (st <= dfx.CHARTTIME) & (dfx.CHARTTIME <= st + interval)
             if len(dfx.loc[mask]) > 0:
                 dfx.loc[mask, 'TIMESTEP'] = timestep
-                timestep += 1
+
+            timestep += 1
             st += interval
 
         return dfx
 
     df_grouped_by_hadmid_timestep_added = grouped_by_hadmid.apply(add_timestep_per_hadmid)
     df_labevents = df_labevents.merge(df_grouped_by_hadmid_timestep_added[['ROW_ID', 'TIMESTEP']], how='left', on='ROW_ID', copy=False)
+    df_labevents = df_labevents[df_labevents.TIMESTEP.notnull()]  # above `merge` step will introduce `nan`
 
     # **************************************************************************************************************** #
     print("*** Merging repeat edges ***")
@@ -188,7 +199,9 @@ def preprocess_labevents(src_csv_path, dst_csv_path, value_na=0):
             sr_itemid_repeat = sr_itemid_value_counts[sr_itemid_value_counts > 1]
 
             for itemid_repeat in list(sr_itemid_repeat.index):
-                deprecate_entry_rowid = df_curr_hadmid_curr_timestep[df_curr_hadmid_curr_timestep.ITEMID == itemid_repeat].sort_values(by="CHARTTIME").ROW_ID.iloc[0:-1]
+                deprecate_entry_rowid = df_curr_hadmid_curr_timestep[df_curr_hadmid_curr_timestep.ITEMID == itemid_repeat]\
+                                            .sort_values(by="CHARTTIME")\
+                                            .ROW_ID.iloc[0:-1]
                 deprecate_entry_index = list(deprecate_entry_rowid.index)
                 drop_indexs.extend(deprecate_entry_index)
 
@@ -200,7 +213,10 @@ if __name__ == "__main__":
     path_dataset = r"/data/data2/041/datasets/mimic-iii-clinical-database-1.4"
     preprocess_admission(src_csv_path=path.join(path_dataset, "ADMISSIONS.csv.gz"),
                          dst_csv_path=path.join(path_dataset, "ADMISSIONS_NEW.csv.gz"))
+
     preprocess_labitems(src_csv_path=path.join(path_dataset, "D_LABITEMS.csv.gz"),
                         dst_csv_path=path.join(path_dataset, "D_LABITEMS_NEW.csv.gz"))
+
     preprocess_labevents(src_csv_path=path.join(path_dataset, "LABEVENTS.csv.gz"),
-                         dst_csv_path=path.join(path_dataset, "LABEVENTS_NEW_remove_duplicate_edges.csv.gz"))
+                         dst_csv_path=path.join(path_dataset, "LABEVENTS_PREPROCESSED.csv.gz"),
+                         src_csv_path_admi=path.join(path_dataset, "ADMISSIONS.csv.gz"))
