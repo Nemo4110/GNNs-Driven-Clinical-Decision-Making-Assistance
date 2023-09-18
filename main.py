@@ -5,11 +5,10 @@ import torch.nn.functional as F
 
 from tqdm import tqdm
 from d2l import torch as d2l
-from sklearn.metrics import roc_auc_score
 
 from dataset.hgs import MyOwnDataset
 from model.lers import LERS
-from utils.gird import GridOfRessults
+from utils.metrics import Logger
 
 
 if __name__ == '__main__':
@@ -65,71 +64,58 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     # with torch.autograd.detect_anomaly():
-
-    gird      = GridOfRessults(max_timestep=args.max_timestep)
-    gird4drug = GridOfRessults(max_timestep=args.max_timestep)
-
-    t_loop = tqdm(range(args.epochs))
-    for epoch in t_loop:
+    for epoch in tqdm(range(args.epochs)):
         model.train()
-        metric_train = d2l.Accumulator(2)  # total_examples, total_loss
         t_loop_train_set = tqdm(train_set, leave=False)
         for hg in t_loop_train_set:
             optimizer.zero_grad()
             hg = hg.to(device)
-            scores, labels, scores4drug, labels4drug = model(hg)  # Note: now scores and labels have the same shape
+            list_scores4item, list_labels4item, list_scores4drug, list_labels4drug = model(hg)  # Note: now scores and labels have the same shape
 
-            # TODO: validate the `start_dim` shoule be 1 or 0?
-            #       or, in other words, will the model performence improve
-            #       after set `start_dim` to 0, and `end_dim` to 0?
-            scores = torch.flatten(scores, start_dim=1)
-            labels = torch.flatten(labels, start_dim=1)
-            scores4drug = torch.flatten(scores4drug, start_dim=1)
-            labels4drug = torch.flatten(labels4drug, start_dim=1)
+            loss4item = torch.tensor(0.0).to(device)
+            for scores4item, labels4item in zip(list_scores4item, list_labels4item):
+                loss4item += F.binary_cross_entropy_with_logits(scores4item, labels4item)
 
-            loss4labi = F.binary_cross_entropy_with_logits(scores, labels)
-            loss4drug = F.binary_cross_entropy_with_logits(scores4drug, labels4drug)
+            loss4drug = torch.tensor(0.0).to(device)
+            for scores4drug, labels4drug in zip(list_scores4drug, list_labels4drug):
+                loss4drug += F.binary_cross_entropy_with_logits(scores4drug, labels4drug)
 
-            loss = loss4labi + 7*loss4drug  # with different weight
+            loss = loss4item + loss4drug  # with different weight
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
             optimizer.step()
 
-            metric_train.add(scores.numel(), loss * (scores.numel()))
             t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss:.4f} \033[0m')
 
-        train_loss = metric_train[1] / metric_train[0]
-        t_loop.set_postfix_str(f'\033[32m Training Loss: {train_loss:.4f}\033[0m')
-
     if val_set is not None:
+        logger4item = Logger(max_timestep=args.max_timestep)
+        logger4drug = Logger(max_timestep=args.max_timestep)
+
         model.eval()
         with torch.no_grad():
             t_loop_val_set = tqdm(val_set, leave=False)
             for hg in t_loop_val_set:
                 hg = hg.to(device)
-                scores, labels, scores4drug, labels4drug = model(hg)
 
-                gird.add_batch_result_per_timestep(scores, labels)
-                auc = gird.get_curr_auc()
+                list_scores4item, list_labels4item, list_scores4drug, list_labels4drug = model(hg)
 
-                gird4drug.add_batch_result_per_timestep(scores4drug, labels4drug)
-                auc4drug = gird4drug.get_curr_auc()
+                logger4item.log(list_scores4item, list_labels4item)
+                logger4drug.log(list_scores4drug, list_labels4drug)
 
-                t_loop_val_set.set_postfix_str(f'AUC4LABITEM: {auc:.4f}, AUC4DRUG: {auc4drug:.4f}')
-
-            avg_auc = 0.5 * (auc + auc4drug)
+                t_loop_val_set.set_postfix_str(f'AUC4LABITEM: {logger4item.get_curr_auc():.4f}, '
+                                               f'AUC4DRUG: {logger4drug.get_curr_auc():.4f}')
 
     pth_pts = os.path.join(".", "model", "hub")
     pth_res = os.path.join(".", "results", "dfs")
     os.mkdir(pth_pts) if not os.path.exists(pth_pts) else None
     os.mkdir(pth_res) if not os.path.exists(pth_res) else None
 
-    str_prefix = f"4LABITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-    gird.save_results(pth=pth_res, description=str_prefix)
-
+    str_prefix4item = f"4LABITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
     str_prefix4drug = f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-    gird4drug.save_results(pth=pth_res, description=str_prefix4drug)
+    logger4item.save(path=pth_res, description=str_prefix4item)
+    logger4drug.save(path=pth_res, description=str_prefix4drug)
 
     model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-    torch.save(model.state_dict(), os.path.join(pth_pts, f"{str_prefix}_auc={avg_auc:.4f}.pt"))
+    avg_auc = 0.5 * (logger4item.get_curr_auc() + logger4drug.get_curr_auc())
+    torch.save(model.state_dict(), os.path.join(pth_pts, f"{model_saving_prefix}_auc={avg_auc:.4f}.pt"))

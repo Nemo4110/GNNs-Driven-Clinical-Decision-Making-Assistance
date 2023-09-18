@@ -37,7 +37,7 @@ class Classifier(torch.nn.Module):
 
 v.i.a: [Link Prediction on MovieLens](https://colab.research.google.com/drive/1xpzn1Nvai1ygd_P5Yambc_oe4VBPK_ZT?usp=sharing)
 
-## Choice 2: Using projection matrix
+## ~~Choice 2: Using projection matrix~~
 
 ### Single score
 

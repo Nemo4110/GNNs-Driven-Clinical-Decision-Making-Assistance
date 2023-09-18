@@ -1,5 +1,5 @@
 r"""
-used to calculate the DDI.
+Class used to calculate the DDI.
 """
 
 import pandas as pd

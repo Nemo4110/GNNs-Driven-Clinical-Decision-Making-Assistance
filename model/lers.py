@@ -3,12 +3,12 @@ import torch
 import torch.nn as nn
 import torch_geometric.transforms as T
 import torch.nn.functional as F
-import d2l.torch as d2l
 import numpy as np
 
 from torch_geometric.data import HeteroData
 from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
 from torch_geometric.nn import to_hetero
+from torch_geometric.utils import negative_sampling
 
 from dataset.hgs import MyOwnDataset
 from model.position_encoding import PositionalEncoding
@@ -67,6 +67,22 @@ class MultiGnns(nn.Module):
         return list_dict_node_feats
 
 
+class LinksPredictor(nn.Module):
+    def __init__(self, hidden_dim=128):
+        super().__init__()
+        self.re_weight_a = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+        self.re_weight_b = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+
+    def forward(self, node_features_a, node_features_b, edge_label_index):
+        node_features_a_selected = node_features_a[edge_label_index[0]]
+        node_features_b_selected = node_features_b[edge_label_index[1]]
+
+        node_features_a_selected = self.re_weight_a(node_features_a_selected)
+        node_features_b_selected = self.re_weight_b(node_features_b_selected)
+
+        return (node_features_a_selected * node_features_b_selected).sum(dim=-1)
+
+
 class LERS(nn.Module):
     def __init__(self,
                  max_timestep: int,
@@ -121,12 +137,83 @@ class LERS(nn.Module):
         self.decoder_labitem   = nn.TransformerDecoder(self.decoder_layers_labitem,   num_layers=self.num_decoder_layers_labitem)
         self.decoder_drug      = nn.TransformerDecoder(self.decoder_layers_drug,      num_layers=self.num_decoder_layers_drug)
 
+        self.links_predictor4item = LinksPredictor(hidden_dim=self.hidden_dim)
+        self.links_predictor4drug = LinksPredictor(hidden_dim=self.hidden_dim)
+
         self.reset_parameters()
 
     def reset_parameters(self):
         for weight in self.parameters():
             if len(weight.shape) > 1:
                 nn.init.xavier_normal_(weight)
+
+    @staticmethod
+    def get_subgraph_by_timestep(hg: HeteroData, timestep: int):
+        device = hg["admission", "did", "labitem"].timestep.device
+
+        # https://discuss.pytorch.org/t/typeerror-expected-tensoroptions-dtype-float-device-cpu-layout-strided-requires-grad-false-default-pinned-memory-false-default-memory-format-nullopt/159558
+        mask4item = (hg["admission", "did", "labitem"].timestep == timestep).to(device)
+        eidx4item = hg["admission", "did", "labitem"].edge_index[:, mask4item]
+        ex4item   = hg["admission", "did", "labitem"].x[mask4item, :]
+
+        mask4drug = (hg["admission", "took", "drug"].timestep == timestep).to(device)
+        eidx4drug = hg["admission", "took", "drug"].edge_index[:, mask4drug]
+        ex4drug   = hg["admission", "took", "drug"].x[mask4drug, :]
+
+        sub_hg = HeteroData()
+
+        # Nodes
+        sub_hg["admission"].node_id = hg["admission"].node_id.clone()
+        sub_hg["admission"].x       = hg["admission"].x.clone().float()
+
+        sub_hg["labitem"].node_id = hg["labitem"].node_id.clone()
+        sub_hg["labitem"].x       = hg["labitem"].x.clone().float()
+
+        sub_hg["drug"].node_id = hg["drug"].node_id.clone()
+        sub_hg["drug"].x       = hg["drug"].x.clone().float()
+
+        # Edges
+        sub_hg["admission", "did", "labitem"].edge_index = eidx4item.clone()
+        sub_hg["admission", "did", "labitem"].x          = ex4item.clone().float()
+
+        sub_hg["admission", "took", "drug"].edge_index = eidx4drug.clone()
+        sub_hg["admission", "took", "drug"].x          = ex4drug.clone().float()
+
+        assert timestep < torch.max(hg["admission", "did", "labitem"].timestep), "last timestep has not labels!"
+        assert timestep < torch.max(hg["admission", "took", "drug"].timestep),   "last timestep has not labels!"
+
+        mask_next_t4item = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
+        sub_hg.labels4item_pos_index = hg["admission", "did", "labitem"].edge_index[:, mask_next_t4item].clone()
+        sub_hg.labels4item_neg_index = negative_sampling(sub_hg.labels4item_pos_index,
+                                                         num_neg_samples=sub_hg.labels4item_pos_index.shape[1] * 2,
+                                                         num_nodes=(sub_hg["admission"].node_id.shape[0],
+                                                                    sub_hg["labitem"].node_id.shape[0])).to(device)
+        sub_hg.lables4item_index = torch.cat((sub_hg.labels4item_pos_index, sub_hg.labels4item_neg_index), dim=1)
+        sub_hg.lables4item = torch.cat((torch.ones(sub_hg.labels4item_pos_index.shape[1]),
+                                        torch.zeros(sub_hg.labels4item_neg_index.shape[1])), dim=0).to(device)
+        index4item_shuffle = torch.randperm(sub_hg.lables4item_index.shape[1]).to(device)
+        sub_hg.lables4item_index = sub_hg.lables4item_index[:, index4item_shuffle]
+        sub_hg.lables4item = sub_hg.lables4item[index4item_shuffle]
+
+        mask_next_t4drug = (hg["admission", "took", "drug"].timestep == (timestep+1)).to(device)
+        sub_hg.labels4drug_pos_index = hg["admission", "took", "drug"].edge_index[:, mask_next_t4drug].clone()
+        sub_hg.labels4drug_neg_index = negative_sampling(sub_hg.labels4drug_pos_index,
+                                                         num_neg_samples=sub_hg.labels4drug_pos_index.shape[1] * 2,
+                                                         num_nodes=(sub_hg["admission"].node_id.shape[0],
+                                                                    sub_hg["drug"].node_id.shape[0])).to(device)
+        sub_hg.labels4drug_index = torch.cat((sub_hg.labels4drug_pos_index, sub_hg.labels4drug_neg_index), dim=1)
+        sub_hg.labels4drug = torch.cat((torch.ones(sub_hg.labels4drug_pos_index.shape[1]),
+                                        torch.zeros(sub_hg.labels4drug_neg_index.shape[1])), dim=0).to(device)
+        index4drug_shuffle = torch.randperm(sub_hg.labels4drug_index.shape[1]).to(device)
+        sub_hg.labels4drug_index = sub_hg.labels4drug_index[:, index4drug_shuffle]
+        sub_hg.labels4drug = sub_hg.labels4drug[index4drug_shuffle]
+
+        # We also need to make sure to add the reverse edges from labitems to admission
+        # in order to let a GNN be able to pass messages in both directions.
+        # We can leverage the `T.ToUndirected()` transform for this from PyG:
+        sub_hg = T.ToUndirected()(sub_hg)
+
+        return sub_hg
 
     def forward(self, hg: HeteroData):
         hgs = [self.get_subgraph_by_timestep(hg, timestep=t) for t in range(self.max_timestep)]
@@ -155,7 +242,6 @@ class LERS(nn.Module):
 
         device = admission_node_feats.device
         tgt_mask = memory_mask = nn.Transformer.generate_square_subsequent_mask(self.max_timestep).to(device)
-        # tgt_mask = memory_mask = torch.triu(torch.full((self.max_timestep, self.max_timestep), -1e+31, device=device), diagonal=1)
 
         tgt_admi = mem_admi = admission_node_feats
         tgt_labi = mem_labi = labitem_node_feats
@@ -165,72 +251,16 @@ class LERS(nn.Module):
         labitem_node_feats   = self.decoder_labitem(  tgt=tgt_labi, memory=mem_labi, tgt_mask=tgt_mask, memory_mask=memory_mask)
         drug_node_feats      = self.decoder_drug(     tgt=tgt_drug, memory=mem_drug, tgt_mask=tgt_mask, memory_mask=memory_mask)
 
-        # Link predictions
-        scores      = torch.matmul(admission_node_feats, labitem_node_feats.transpose(1, 2))
-        scores4drug = torch.matmul(admission_node_feats, drug_node_feats.transpose(1, 2))
+        # Link predicting:
+        list_labels4item = []; list_scores4item = []
+        list_labels4drug = []; list_scores4drug = []
+        for curr_timestep, hg in enumerate(hgs):
+            list_labels4item.append(hg.lables4item)
+            list_labels4drug.append(hg.labels4drug)
+            list_scores4item.append(self.links_predictor4item(admission_node_feats[curr_timestep], labitem_node_feats[curr_timestep], hg.lables4item_index))
+            list_scores4drug.append(self.links_predictor4drug(admission_node_feats[curr_timestep], drug_node_feats[curr_timestep],    hg.labels4drug_index))
 
-        labels      = torch.stack([self.to_dense_adj(hg.labels,      shape=(scores.shape[-2], scores.shape[-1]))       for hg in hgs])
-        labels4drug = torch.stack([self.to_dense_adj(hg.labels4drug, shape=(scores4drug.shape[-2], scores4drug.shape[-1])) for hg in hgs])
-
-        return scores, labels, scores4drug, labels4drug
-
-    @staticmethod
-    def get_subgraph_by_timestep(hg: HeteroData, timestep: int):
-        device = hg["admission", "did", "labitem"].timestep.device
-
-        # https://discuss.pytorch.org/t/typeerror-expected-tensoroptions-dtype-float-device-cpu-layout-strided-requires-grad-false-default-pinned-memory-false-default-memory-format-nullopt/159558
-        mask = (hg["admission", "did", "labitem"].timestep == timestep).to(device)
-        eidx = hg["admission", "did", "labitem"].edge_index[:, mask]
-        ex   = hg["admission", "did", "labitem"].x[mask, :]
-
-        mask4drug = (hg["admission", "took", "drug"].timestep == timestep).to(device)
-        eidx4drug = hg["admission", "took", "drug"].edge_index[:, mask4drug]
-        ex4drug   = hg["admission", "took", "drug"].x[mask4drug, :]
-
-        sub_hg = HeteroData()
-
-        # Nodes
-        sub_hg["admission"].node_id = hg["admission"].node_id.clone()
-        sub_hg["admission"].x       = hg["admission"].x.clone().float()
-
-        sub_hg["labitem"].node_id = hg["labitem"].node_id.clone()
-        sub_hg["labitem"].x       = hg["labitem"].x.clone().float()
-
-        sub_hg["drug"].node_id = hg["drug"].node_id.clone()
-        sub_hg["drug"].x       = hg["drug"].x.clone().float()
-
-        # Edges
-        sub_hg["admission", "did", "labitem"].edge_index = eidx.clone()
-        sub_hg["admission", "did", "labitem"].x          = ex.clone().float()
-
-        sub_hg["admission", "took", "drug"].edge_index = eidx4drug.clone()
-        sub_hg["admission", "took", "drug"].x          = ex4drug.clone().float()
-
-        # Ensure that the current time step does not exceed the maximum time step recorded
-        # for this batch of hospitalized patients.
-        assert timestep < torch.max(hg["admission", "did", "labitem"].timestep), "last timestep has not labels!"
-        assert timestep < torch.max(hg["admission", "took", "drug"].timestep),   "last timestep has not labels!"
-
-        mask_next_t = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
-        sub_hg.labels = hg["admission", "did", "labitem"].edge_index[:, mask_next_t].clone()
-
-        mask_next_t4drug = (hg["admission", "took", "drug"].timestep == (timestep+1)).to(device)
-        sub_hg.labels4drug = hg["admission", "took", "drug"].edge_index[:, mask_next_t4drug].clone()
-
-        sub_hg = T.ToUndirected()(sub_hg)
-        return sub_hg
-
-    @staticmethod
-    def to_dense_adj(edge_index: torch.tensor, shape):
-        # here must ensure all tensor be on same device
-        dense_adj = torch.zeros(shape[0], shape[1], dtype=torch.float, device=edge_index.device)
-
-        # Note: Due to the heterogeneity of nodes (there are many different nodes) this adjacency matrix is a rectangle, 
-        #       not a square like a homogeneous graph.
-        for src, tgt in zip(edge_index[0], edge_index[1]):
-            dense_adj[src][tgt] = 1
-
-        return dense_adj
+        return list_scores4item, list_labels4item, list_scores4drug, list_labels4drug
 
 
 if __name__ == "__main__":
