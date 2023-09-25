@@ -253,14 +253,15 @@ class LERS(nn.Module):
 
         # Link predicting:
         list_labels4item = []; list_scores4item = []
-        list_labels4drug = []; list_scores4drug = []
+        list_labels4drug = []; list_scores4drug = []; list_edge_indices4drug = []
         for curr_timestep, hg in enumerate(hgs):
             list_labels4item.append(hg.lables4item)
             list_labels4drug.append(hg.labels4drug)
             list_scores4item.append(self.links_predictor4item(admission_node_feats[curr_timestep], labitem_node_feats[curr_timestep], hg.lables4item_index))
             list_scores4drug.append(self.links_predictor4drug(admission_node_feats[curr_timestep], drug_node_feats[curr_timestep],    hg.labels4drug_index))
+            list_edge_indices4drug.append(hg.labels4drug_index)
 
-        return list_scores4item, list_labels4item, list_scores4drug, list_labels4drug
+        return list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug
 
 
 if __name__ == "__main__":

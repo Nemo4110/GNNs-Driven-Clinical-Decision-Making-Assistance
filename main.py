@@ -70,7 +70,7 @@ if __name__ == '__main__':
         for hg in t_loop_train_set:
             optimizer.zero_grad()
             hg = hg.to(device)
-            list_scores4item, list_labels4item, list_scores4drug, list_labels4drug = model(hg)  # Note: now scores and labels have the same shape
+            list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, _ = model(hg)  # Note: now scores and labels have the same shape
 
             loss4item = torch.tensor(0.0).to(device)
             for scores4item, labels4item in zip(list_scores4item, list_labels4item):
@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     if val_set is not None:
         logger4item = Logger(max_timestep=args.max_timestep)
-        logger4drug = Logger(max_timestep=args.max_timestep)
+        logger4drug = Logger(max_timestep=args.max_timestep, is_calc_ddi=True)
 
         model.eval()
         with torch.no_grad():
@@ -98,10 +98,11 @@ if __name__ == '__main__':
             for hg in t_loop_val_set:
                 hg = hg.to(device)
 
-                list_scores4item, list_labels4item, list_scores4drug, list_labels4drug = model(hg)
+                list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug = model(hg)
 
                 logger4item.log(list_scores4item, list_labels4item)
                 logger4drug.log(list_scores4drug, list_labels4drug)
+                logger4drug.log_ddi(list_scores4drug, list_labels4drug, list_edge_indices4drug)
 
                 t_loop_val_set.set_postfix_str(f'AUC4LABITEM: {logger4item.get_curr_auc():.4f}, '
                                                f'AUC4DRUG: {logger4drug.get_curr_auc():.4f}')

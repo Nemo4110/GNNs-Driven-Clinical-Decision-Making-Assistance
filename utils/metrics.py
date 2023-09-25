@@ -13,11 +13,13 @@ from sklearn.metrics import \
     precision_score, \
     recall_score, \
     precision_recall_curve
+from utils.ddi import DDICalculator
 
 
 class Logger:
     r"""For logging evaluating metrics."""
-    def __init__(self, max_timestep):
+    def __init__(self, max_timestep, is_calc_ddi: bool=False):
+        self.is_calc_ddi = is_calc_ddi
         self.df = pd.DataFrame()
 
         self.df["auc"]       = [0] * max_timestep  # note: labels start from timestep = 1!
@@ -27,6 +29,11 @@ class Logger:
         self.df["recall"]    = [0] * max_timestep
         self.df["F1"]        = [0] * max_timestep
         self.df["PRAUC"]     = [0] * max_timestep
+
+        if self.is_calc_ddi:
+            self.df["DDI_true"] = [0] * max_timestep
+            self.df["DDI_pred"] = [0] * max_timestep
+            self.ddi_calculator = DDICalculator()
 
         self.cnt = 0
 
@@ -65,6 +72,23 @@ class Logger:
         self.df["F1"]        += list_F1
         self.df["PRAUC"]     += list_PRAUC
 
+    def log_ddi(self, list_y_pred, list_y_true, list_edge_indices):
+        assert self.is_calc_ddi
+
+        list_ddi_true = []
+        list_ddi_pred = []
+        for y_pred, y_true, edge_indices in zip(list_y_pred, list_y_true, list_edge_indices):
+            y_pred = y_pred.cpu()
+            y_true = y_true.cpu()
+            edge_indices = edge_indices.cpu()
+
+            list_ddi_true.append(self.ddi_calculator.calc_mean_ddi_rate_for_batch_admi(y_true, edge_indices))
+            list_ddi_pred.append(self.ddi_calculator.calc_mean_ddi_rate_for_batch_admi(y_pred, edge_indices))
+
+        # self.cnt += 1  # already done in `log`
+        self.df["DDI_true"] += list_ddi_true
+        self.df["DDI_pred"] += list_ddi_pred
+
     def get_curr_auc(self):
         return (self.df["auc"] / self.cnt).mean()
 
@@ -76,5 +100,9 @@ class Logger:
         self.df["recall"]    = self.df["recall"]    / self.cnt
         self.df["F1"]        = self.df["F1"]        / self.cnt
         self.df["PRAUC"]     = self.df["PRAUC"]     / self.cnt
+
+        if self.is_calc_ddi:
+            self.df["DDI_true"] = self.df["DDI_true"] / self.cnt
+            self.df["DDI_pred"] = self.df["DDI_pred"] / self.cnt
 
         self.df.to_csv(os.path.join(path, f"{description}.csv"))
