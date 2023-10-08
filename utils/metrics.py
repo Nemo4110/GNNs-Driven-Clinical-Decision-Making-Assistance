@@ -37,7 +37,9 @@ class Logger:
 
         self.cnt = 0
 
-    def log(self, list_y_pred, list_y_true):
+    def log(self, list_y_pred, list_y_true, list_edge_indices=None):
+        if self.is_calc_ddi and list_edge_indices is not None:
+            self.log_ddi(list_y_pred, list_y_true, list_edge_indices)
 
         list_auc       = []
         list_acc       = []
@@ -73,8 +75,6 @@ class Logger:
         self.df["PRAUC"]     += list_PRAUC
 
     def log_ddi(self, list_y_pred, list_y_true, list_edge_indices):
-        assert self.is_calc_ddi
-
         list_ddi_true = []
         list_ddi_pred = []
         for y_pred, y_true, edge_indices in zip(list_y_pred, list_y_true, list_edge_indices):
@@ -82,8 +82,11 @@ class Logger:
             y_true = y_true.cpu()
             edge_indices = edge_indices.cpu()
 
+            fpr, tpr, thresholds = roc_curve(y_true, y_pred, drop_intermediate=False)
+            best_threshold = thresholds[np.argmax(tpr - fpr)]  # youden index
+
             list_ddi_true.append(self.ddi_calculator.calc_mean_ddi_rate_for_batch_admi(y_true, edge_indices))
-            list_ddi_pred.append(self.ddi_calculator.calc_mean_ddi_rate_for_batch_admi(y_pred, edge_indices))
+            list_ddi_pred.append(self.ddi_calculator.calc_mean_ddi_rate_for_batch_admi(y_pred > best_threshold, edge_indices))
 
         # self.cnt += 1  # already done in `log`
         self.df["DDI_true"] += list_ddi_true

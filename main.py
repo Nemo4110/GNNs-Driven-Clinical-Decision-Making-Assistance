@@ -101,8 +101,7 @@ if __name__ == '__main__':
                 list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug = model(hg)
 
                 logger4item.log(list_scores4item, list_labels4item)
-                logger4drug.log(list_scores4drug, list_labels4drug)
-                logger4drug.log_ddi(list_scores4drug, list_labels4drug, list_edge_indices4drug)
+                logger4drug.log(list_scores4drug, list_labels4drug, list_edge_indices4drug)
 
                 t_loop_val_set.set_postfix_str(f'AUC4LABITEM: {logger4item.get_curr_auc():.4f}, '
                                                f'AUC4DRUG: {logger4drug.get_curr_auc():.4f}')

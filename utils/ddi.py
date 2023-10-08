@@ -51,7 +51,8 @@ class DDICalculator:
             for curr_cid_idx in eval(list_curr_cid_idx):
                 for list_other_cid_idx in q.queue:
                     for other_cid_idx in eval(list_other_cid_idx):
-                        if self.ddi_adj[curr_cid_idx][other_cid_idx] > 0:
+                        if self.ddi_adj[curr_cid_idx][other_cid_idx] > 0 or \
+                           self.ddi_adj[other_cid_idx][curr_cid_idx] > 0:
                             cnt_ddi_pair += 1
                         cnt_all_pair += 1
                     

@@ -10,7 +10,7 @@ class MyOwnDataset(Dataset):
         super().__init__()
 
         assert os.path.exists(root_path), f"The dataset root path >>>{root_path}<<< isn't exist!"
-        assert usage in ["train", "val", "test"], "Only support usage in ['train', 'val', 'test']!"
+        assert usage in ["train", "val"], "Only support usage in ['train', 'val']!"
 
         self.root_path = os.path.join(root_path, usage)
         self.pt_files = [f for f in os.listdir(self.root_path) if f[-3:]==".pt"]
@@ -23,6 +23,6 @@ class MyOwnDataset(Dataset):
 
 
 if __name__ == "__main__":
-    train_set = MyOwnDataset(root_path=r"D:\Datasets\mimic\mimic-iii-hgs\batch_size_128", usage="train")
+    train_set = MyOwnDataset(root_path=r"D:\Datasets\mimic\mimic-iii-hgs-new\batch_size_128", usage="val")
     for hg in tqdm(train_set):
         assert max(hg["admission"].node_id) >= max(hg["admission", "did", "labitem"].edge_index[0])

@@ -109,7 +109,7 @@ class LERS(nn.Module):
 
         self.hidden_dim = hidden_dim
 
-        # TODO: Think about the first args of `nn.Embedding` here should equal to
+        # DONE: Think about the first args of `nn.Embedding` here should equal to
         #  - max of total `HADM_ID`?
         #  - current batch_size of `HADM_ID`?
         #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
