@@ -19,21 +19,17 @@ class DDICalculator:
         with open(os.path.join(path_ddi_dataset, "ddi_adj_matrix.pickle"), 'rb') as f:
             self.ddi_adj = pickle.load(f)
 
-    def calc_mean_ddi_rate_for_batch_admi(self, edge_labels, edge_indices):
-        edge_labels = edge_labels.cpu()
-        edge_indices = edge_indices.cpu()
-
+    def calc_ddis_for_batch_admi(self, edge_labels, edge_indices):
         existing_edge_indices = torch.index_select(edge_indices, dim=1, index=torch.nonzero(edge_labels).flatten())
         set_admi = existing_edge_indices[0].unique()
 
-        total_ddi = 0
-        cnt = 0
+        ddis = []
         for curr_admi in set_admi:
             indices_curr_hadm = torch.nonzero(existing_edge_indices[0] == curr_admi).flatten()
             durg_idxes_curr_admi = torch.index_select(existing_edge_indices, dim=1, index=indices_curr_hadm)[1]
-            total_ddi += self.calc_ddi_rate(durg_idxes_curr_admi)
-            cnt += 1
-        return 0 if cnt == 0 else total_ddi / cnt
+            ddis.append(self.calc_ddi_rate(durg_idxes_curr_admi))
+
+        return ddis
 
     def calc_ddi_rate(self, durg_idxes_curr_admi):
         mask = self.df_map_of_idx4ndc_rxcui_atc4_cids.idx.isin(durg_idxes_curr_admi)
