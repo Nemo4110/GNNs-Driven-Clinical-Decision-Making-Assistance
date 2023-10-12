@@ -30,14 +30,16 @@ if __name__ == '__main__':
     # Paths
     parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs-new", help="path where dataset directory locates")  # in linux
     parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                   help="path where models save")
+    parser.add_argument("--path_dir_results",   default=r"./results",                     help="path where results save")
 
     # Experiment settings
     parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task")
     parser.add_argument("--epochs",                       type=int, default=3)
-    parser.add_argument("--train",            action="store_true",  default=False,      help="specify whether do training")
-    parser.add_argument("--val",              action="store_true",  default=False,      help="specify whether do validating")
+    parser.add_argument("--train",            action="store_true",  default=False,     help="specify whether do training")
+    parser.add_argument("--val",              action="store_true",  default=False,     help="specify whether do validating")
     parser.add_argument("--val_model_state_dict",                   default=None,      help="val only model's state_dict file name")  # must be specified when --train=False!
-    parser.add_argument("--use_gpu",          action="store_true",  default=False,      help="specify whether to use GPU")
+    parser.add_argument("--val_num",                      type=int, default=-1,        help="number of verifications")
+    parser.add_argument("--use_gpu",          action="store_true",  default=False,     help="specify whether to use GPU")
     parser.add_argument("--num_gpu",                      type=int, default=0,         help="specify which GPU to be used firstly")
     parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
 
@@ -101,8 +103,8 @@ if __name__ == '__main__':
             model.load_state_dict(model_state_dict)
 
         # metrics loggers
-        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(".", "results"))
-        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(".", "results"), is_calc_ddi=True)
+        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(args.path_dir_results, f"#{args.val_num}"))
+        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(args.path_dir_results, f"#{args.val_num}"), is_calc_ddi=True)
 
         model.eval()
         with torch.no_grad():

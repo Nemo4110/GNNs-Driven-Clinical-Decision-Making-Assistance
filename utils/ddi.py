@@ -31,8 +31,8 @@ class DDICalculator:
 
         return ddis
 
-    def calc_ddi_rate(self, durg_idxes_curr_admi):
-        mask = self.df_map_of_idx4ndc_rxcui_atc4_cids.idx.isin(durg_idxes_curr_admi)
+    def calc_ddi_rate(self, durg_idxes_curr_admi: torch.tensor):
+        mask = self.df_map_of_idx4ndc_rxcui_atc4_cids.idx.isin(durg_idxes_curr_admi.tolist())  # MUST tolist !!!
         df_drugs_curr_admi = self.df_map_of_idx4ndc_rxcui_atc4_cids.loc[mask]
         df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.list_cid_idx.notnull()]
 
@@ -45,11 +45,14 @@ class DDICalculator:
         while q.qsize() > 1:
             list_curr_cid_idx = q.get()
             for curr_cid_idx in eval(list_curr_cid_idx):
-                for list_other_cid_idx in q.queue:
-                    for other_cid_idx in eval(list_other_cid_idx):
-                        if self.ddi_adj[curr_cid_idx][other_cid_idx] > 0 or \
-                           self.ddi_adj[other_cid_idx][curr_cid_idx] > 0:
-                            cnt_ddi_pair += 1
-                        cnt_all_pair += 1
+                list_other_cid_idx = []
+                for elm in q.queue:
+                    list_other_cid_idx.extend(eval(elm))
+
+                for other_cid_idx in list_other_cid_idx:
+                    if self.ddi_adj[curr_cid_idx][other_cid_idx] > 0 or \
+                       self.ddi_adj[other_cid_idx][curr_cid_idx] > 0:
+                        cnt_ddi_pair += 1
+                    cnt_all_pair += 1
                     
         return 0 if cnt_all_pair == 0 else cnt_ddi_pair / cnt_all_pair
