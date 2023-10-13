@@ -1,7 +1,7 @@
-checkpoints/
 .idea/
-mimic-iii-hgs/
 documents/overleaf_pictures/
+documents/icons/
+results/
 
 *.gitignore
 *.whl
@@ -9,6 +9,3 @@ documents/overleaf_pictures/
 *.png
 *.pt
 *.drawio
-
-/requirements.txt
-/results/

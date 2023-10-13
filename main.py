@@ -48,6 +48,10 @@ if __name__ == '__main__':
     if not os.path.exists(args.path_dir_model_hub):
         os.mkdir(args.path_dir_model_hub)
     root_path = os.path.join(args.root_path_dataset, f"batch_size_{args.batch_size_by_HADMID}")
+    resl_path = os.path.join(args.path_dir_results, f"#{args.val_num}")
+    if not os.path.exists(resl_path):
+        os.mkdir(resl_path)
+
     device = d2l.try_gpu(args.num_gpu) if args.use_gpu else torch.device('cpu')
 
     # model
@@ -103,8 +107,8 @@ if __name__ == '__main__':
             model.load_state_dict(model_state_dict)
 
         # metrics loggers
-        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(args.path_dir_results, f"#{args.val_num}"))
-        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=os.path.join(args.path_dir_results, f"#{args.val_num}"), is_calc_ddi=True)
+        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path)
+        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, is_calc_ddi=True)
 
         model.eval()
         with torch.no_grad():
