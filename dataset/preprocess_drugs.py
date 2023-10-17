@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 
 path_dataset = r"/data/data2/041/datasets/mimic-iii-clinical-database-1.4"
+path_ddi_dataset = r"/data/data2/041/datasets/DDI"
 df_admissions = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS.csv.gz"))
 df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
 df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
@@ -206,6 +207,59 @@ def repeating_edges_handler(df_prescriptions):
     return df_prescriptions
 
 
+def drugs_node_features_handler(df_prescriptions_preprocessed: pd.DataFrame):
+    gb_ndc_all = df_prescriptions_preprocessed.groupby("NDC")
+
+    df_drug_node_feature_per_ndc = pd.DataFrame(columns=["NDC",
+                                                         "DRUG_TYPE_MAIN_Proportion",
+                                                         "DRUG_TYPE_BASE_Proportion",
+                                                         "DRUG_TYPE_ADDITIVE_Proportion",
+                                                         "FORM_UNIT_DISP_Freq_1",
+                                                         "FORM_UNIT_DISP_Freq_2",
+                                                         "FORM_UNIT_DISP_Freq_3",
+                                                         "FORM_UNIT_DISP_Freq_4",
+                                                         "FORM_UNIT_DISP_Freq_5"])
+
+    for k, df in tqdm(gb_ndc_all):
+        ser_drug_type = df.DRUG_TYPE.value_counts()
+        sum_drug_type = ser_drug_type.sum()
+        len_drug_type = len(ser_drug_type)
+
+        ser_form_unit = df.FORM_UNIT_DISP.value_counts()
+        len_form_unit = len(ser_form_unit)
+
+        df_drug_node_feature_per_ndc.loc[len(df_drug_node_feature_per_ndc.index)] = [
+            k,
+
+            ser_drug_type.iloc[0] / sum_drug_type,
+            ser_drug_type.iloc[1] / sum_drug_type if len_drug_type == 2 else 0,
+            ser_drug_type.iloc[2] / sum_drug_type if len_drug_type == 3 else 0,
+
+            ser_form_unit.index[0],
+            ser_form_unit.index[1] if len_form_unit == 2 else 0,
+            ser_form_unit.index[2] if len_form_unit == 3 else 0,
+            ser_form_unit.index[3] if len_form_unit == 4 else 0,
+            ser_form_unit.index[4] if len_form_unit == 5 else 0,
+        ]
+
+    with open(os.path.join(path_ddi_dataset, "ndc2rxnorm_mapping.txt"), 'r') as f:
+        ndc2rxnorm = eval(f.read())
+
+    df_drug_node_feature_per_ndc.insert(len(df_drug_node_feature_per_ndc.columns), "rxnorm_id", np.NaN)
+
+    df_drug_node_feature_per_ndc_real = df_drug_node_feature_per_ndc[df_drug_node_feature_per_ndc.NDC > 1000]
+    df_drug_node_feature_per_ndc_fake = df_drug_node_feature_per_ndc[df_drug_node_feature_per_ndc.NDC < 1000]
+    df_drug_node_feature_per_ndc_real["NDC"] = df_drug_node_feature_per_ndc_real["NDC"].map("{:0>11.0f}".format)
+
+    df_drug_node_feature_per_ndc_final = pd.concat([df_drug_node_feature_per_ndc_real,
+                                                    df_drug_node_feature_per_ndc_fake])
+    df_drug_node_feature_per_ndc_final["rxnorm_id"] = df_drug_node_feature_per_ndc_final["NDC"].map(ndc2rxnorm, na_action='ignore')
+    mask = df_drug_node_feature_per_ndc_final.rxnorm_id == ''
+    df_drug_node_feature_per_ndc_final.loc[mask, "rxnorm_id"] = np.NaN
+
+    return df_drug_node_feature_per_ndc_final
+
+
 if __name__ == "__main__":
     df_prescriptions = pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS.csv.gz"))
     df_prescriptions["STARTDATE"] = pd.to_datetime(df_prescriptions["STARTDATE"], format="%Y-%m-%d %H:%M:%S")
@@ -218,22 +272,21 @@ if __name__ == "__main__":
     df_prescriptions = df_prescriptions.loc[df_prescriptions.STARTDATE < df_prescriptions.ENDDATE]
 
     # string columns
-    df_prescriptions['DRUG']            = df_prescriptions['DRUG'].astype("string").str.lower()
-    df_prescriptions["DRUG_TYPE"]       = df_prescriptions["DRUG_TYPE"].astype("string").str.upper()
-    df_prescriptions["PROD_STRENGTH"]   = df_prescriptions["PROD_STRENGTH"].astype("string").str.lower()
-    df_prescriptions["DOSE_UNIT_RX"]    = df_prescriptions["DOSE_UNIT_RX"].astype("string").str.lower()
-    df_prescriptions["FORM_UNIT_DISP"]  = df_prescriptions["FORM_UNIT_DISP"].astype("string").str.lower()
-    df_prescriptions["ROUTE"]           = df_prescriptions["ROUTE"].astype("string").str.upper()
+    df_prescriptions['DRUG']           = df_prescriptions['DRUG'          ].astype("string").str.lower()
+    df_prescriptions["DRUG_TYPE"]      = df_prescriptions["DRUG_TYPE"     ].astype("string").str.upper()
+    df_prescriptions["PROD_STRENGTH"]  = df_prescriptions["PROD_STRENGTH" ].astype("string").str.lower()
+    df_prescriptions["DOSE_UNIT_RX"]   = df_prescriptions["DOSE_UNIT_RX"  ].astype("string").str.lower()
+    df_prescriptions["FORM_UNIT_DISP"] = df_prescriptions["FORM_UNIT_DISP"].astype("string").str.lower()
+    df_prescriptions["ROUTE"]          = df_prescriptions["ROUTE"         ].astype("string").str.upper()
 
     df_prescriptions = ndc0_mapping_handler(df_prescriptions)
-    df_prescriptions = duration_issuse_handler(df_prescriptions); df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_DURATION_SOLVED.csv.gz"))
-    df_prescriptions = ncv_converting_handler(df_prescriptions);  df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_NCV_SOLVED.csv.gz"))
-    df_prescriptions = adding_timestep_handler(df_prescriptions); df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_TIMESTEP_SOLVED.csv.gz"))
-
-    # df_prescriptions = pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS_TIMESTEP_SOLVED.csv.gz"))
-    # df_prescriptions["STARTDATE"] = pd.to_datetime(df_prescriptions["STARTDATE"], format="%Y-%m-%d %H:%M:%S")
-    # df_prescriptions["ENDDATE"]   = pd.to_datetime(df_prescriptions["ENDDATE"],   format="%Y-%m-%d %H:%M:%S")
+    df_prescriptions = duration_issuse_handler(df_prescriptions); # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_DURATION_SOLVED.csv.gz"))
+    df_prescriptions = ncv_converting_handler(df_prescriptions);  # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_NCV_SOLVED.csv.gz"))
+    df_prescriptions = adding_timestep_handler(df_prescriptions); # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_TIMESTEP_SOLVED.csv.gz"))
     df_prescriptions = repeating_edges_handler(df_prescriptions)
 
     df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_PREPROCESSED.csv.gz"))
+
+    df_drug_node_feature_per_ndc_final = drugs_node_features_handler(pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS_PREPROCESSED.csv.gz")))
+    df_drug_node_feature_per_ndc_final.to_csv(os.path.join(path_dataset, "DRUGS_NDC_FEAT.csv.gz"))
 

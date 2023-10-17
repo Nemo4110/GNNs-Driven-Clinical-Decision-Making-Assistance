@@ -1,7 +1,8 @@
-.idea/
-documents/overleaf_pictures/
-documents/icons/
-results/
+/.idea/
+/documents/overleaf_pictures/
+/documents/icons/
+/documents/
+/results/
 
 *.gitignore
 *.whl

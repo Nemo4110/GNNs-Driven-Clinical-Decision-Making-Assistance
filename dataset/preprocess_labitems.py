@@ -1,5 +1,5 @@
 r"""
-A separate script for preprocessing data, same function as `processes.ipynb`.
+A separate script for preprocessing data, same function as `processes_labitems.ipynb`.
 """
 
 import os.path as path
@@ -79,7 +79,7 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
     set_itemid_mixed_value_type = np.setdiff1d(set_itemid_value_type, set_itemid_pure_value_type)
     set_itemid_pure_non_value_type = np.setdiff1d(set_itemid_not_value_type, set_itemid_mixed_value_type)
 
-    # >>> Pure non-value type itemid <<< Need to re-map by catagrory
+    # >>> Pure non-value type itemid <<< Need to re-map by categories
     for itemid in tqdm(set_itemid_pure_non_value_type):
         s = df_labevents[df_labevents.ITEMID == itemid].VALUE.value_counts()
         m = pd.Series(index=s.index, data=range(1, len(s) + 1))
@@ -95,18 +95,6 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 
     # **************************************************************************************************************** #
     print("*** Z-SCORE ***")
-    def box_analysis(data: pd.Series):
-        # Warning: deprecated due to bug!!!
-        # via. <https://juejin.cn/post/6859254388021133326#heading-0>
-        qu = data.quantile(q=0.75)
-        ql = data.quantile(q=0.25)
-
-        iqr = qu - ql
-        up = qu + 1.5 * iqr
-        low = ql - 1.5 * iqr
-
-        mask = (data < up) & (data > low)
-        return mask
 
     def three_theta(data: pd.Series):
         assert len(data) > 1
@@ -146,13 +134,25 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 
         return dfx
 
-    df_itemid_value_type_only_zscore = grouped_by_itemid_value_type_only.apply(z_score_4_value_type_labitem)
+    # df_itemid_value_type_only_zscore = grouped_by_itemid_value_type_only.apply(z_score_4_value_type_labitem)
+    df_itemid_value_type_only_zscore = pd.DataFrame()
+    list_df_itemid_value_type_only_zscore = []
+    for k, df in tqdm(grouped_by_itemid_value_type_only):
+        list_df_itemid_value_type_only_zscore.append(z_score_4_value_type_labitem(df))
+        if len(list_df_itemid_value_type_only_zscore) % 3000 == 0:
+            list_df_itemid_value_type_only_zscore.append(df_itemid_value_type_only_zscore)
+            df_itemid_value_type_only_zscore = pd.concat(list_df_itemid_value_type_only_zscore)
+            list_df_itemid_value_type_only_zscore = []
+    list_df_itemid_value_type_only_zscore.append(df_itemid_value_type_only_zscore)
+    df_itemid_value_type_only_zscore = pd.concat(list_df_itemid_value_type_only_zscore).reset_index(drop=True)
+
     df_labevents = df_labevents.merge(df_itemid_value_type_only_zscore[['ROW_ID', 'VALUENUM_Z-SCORED']], how='left', on='ROW_ID')
     df_labevents['VALUENUM_Z-SCORED'].fillna(value_na, inplace=True)
 
     # **************************************************************************************************************** #
     print("*** Adding TIMESTEP ***")
     grouped_by_hadmid = df_labevents.groupby("HADM_ID")
+
     def add_timestep_per_hadmid(df_grouped_by_hadmid: pd.DataFrame):
         interval_hour = 24  # chosen interval
         df_grouped_by_hadmid = df_grouped_by_hadmid.sort_values(by="CHARTTIME")
@@ -181,7 +181,18 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 
         return dfx
 
-    df_grouped_by_hadmid_timestep_added = grouped_by_hadmid.apply(add_timestep_per_hadmid)
+    # df_grouped_by_hadmid_timestep_added = grouped_by_hadmid.apply(add_timestep_per_hadmid)
+    df_grouped_by_hadmid_timestep_added = pd.DataFrame()
+    list_df_grouped_by_hadmid_timestep_added = []
+    for k, df in tqdm(grouped_by_hadmid):
+        list_df_grouped_by_hadmid_timestep_added.append(add_timestep_per_hadmid(df))
+        if len(list_df_grouped_by_hadmid_timestep_added) % 3000 == 0:
+            list_df_grouped_by_hadmid_timestep_added.append(df_grouped_by_hadmid_timestep_added)
+            df_grouped_by_hadmid_timestep_added = pd.concat(list_df_grouped_by_hadmid_timestep_added)
+            list_df_grouped_by_hadmid_timestep_added = []
+    list_df_grouped_by_hadmid_timestep_added.append(df_grouped_by_hadmid_timestep_added)
+    df_grouped_by_hadmid_timestep_added = pd.concat(list_df_grouped_by_hadmid_timestep_added).reset_index(drop=True)
+
     df_labevents = df_labevents.merge(df_grouped_by_hadmid_timestep_added[['ROW_ID', 'TIMESTEP']], how='left', on='ROW_ID', copy=False)
     df_labevents = df_labevents[df_labevents.TIMESTEP.notnull()]  # above `merge` step will introduce `nan`
 
