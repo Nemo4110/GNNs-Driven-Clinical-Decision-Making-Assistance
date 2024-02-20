@@ -10,7 +10,7 @@ class MyOwnDataset(Dataset):
         super().__init__()
 
         assert os.path.exists(root_path), f"The dataset root path >>>{root_path}<<< isn't exist!"
-        assert usage in ["train", "val"], "Only support usage in ['train', 'val']!"
+        assert usage in ["train", "test"], "Only support usage in ['train', 'test']!"
 
         self.root_path = os.path.join(root_path, usage)
         self.pt_files = [f for f in os.listdir(self.root_path) if f[-3:]==".pt"]

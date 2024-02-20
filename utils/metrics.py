@@ -22,16 +22,19 @@ sys.path.append('..')
 
 
 class Logger:
-    r"""For logging evaluating metrics.
+    r"""For logging testing metrics.
 
     Note: <https://math.stackexchange.com/questions/4205313/total-average-of-averages-not-same-as-the-average-of-total-values>
     """
-    def __init__(self, max_timestep, save_dir_path: str, is_calc_ddi: bool = False):
+    def __init__(self, max_timestep, save_dir_path: str, best_thresholdspath: str, is_calc_ddi: bool = False):
         self.save_dir_path = save_dir_path
         self.is_calc_ddi = is_calc_ddi
 
         self.list_preds_each_timestep = [[] for _ in range(max_timestep)]
         self.list_trues_each_timestep = [[] for _ in range(max_timestep)]
+
+        with open(best_thresholdspath, 'rb') as f:
+            self.dict_best_threholds = pickle.load(f)
 
         if self.is_calc_ddi:
             self.ddi_calculator = DDICalculator()
@@ -60,9 +63,9 @@ class Logger:
         dict_total_performance['rocauc'] = roc_auc_score(trues_total_concated, preds_total_concated)
         precision, recall, ____ = precision_recall_curve(trues_total_concated, preds_total_concated)
         dict_total_performance['prauc'] = auc(recall, precision)
-        fpr, tpr, thresholds = roc_curve(trues_total_concated, preds_total_concated)
-        best_threshold = thresholds[np.argmax(tpr - fpr)]  # youden index
-        preds_total_concated_bool = preds_total_concated > best_threshold
+        # fpr, tpr, thresholds = roc_curve(trues_total_concated, preds_total_concated)
+        # best_threshold = thresholds[np.argmax(tpr - fpr)]  # youden index
+        preds_total_concated_bool = preds_total_concated > self.dict_best_threholds['total']
         dict_total_performance['accuracy']   = accuracy_score(trues_total_concated, preds_total_concated_bool)
         dict_total_performance['jaccard']     = jaccard_score(trues_total_concated, preds_total_concated_bool)
         dict_total_performance['precision'] = precision_score(trues_total_concated, preds_total_concated_bool)
@@ -80,17 +83,15 @@ class Logger:
         list_recall    = []
         list_f1        = []
 
-        list_best_threshold_each_timestep = []
-        for preds_current_timestep, trues_current_timestep in tqdm(
-                zip(list_preds_each_timestep_concated, list_tures_each_timestep_concated), leave=False):
+        for current_timestep, (preds_current_timestep, trues_current_timestep) in enumerate(
+                zip(list_preds_each_timestep_concated, list_tures_each_timestep_concated)):
             list_rocauc.append(roc_auc_score(trues_current_timestep, preds_current_timestep))
             precision, recall, _ = precision_recall_curve(trues_current_timestep, preds_current_timestep)
             list_prauc.append(auc(recall, precision))
 
-            fpr, tpr, thresholds = roc_curve(trues_current_timestep, preds_current_timestep)
-            best_threshold_curr_timestep = thresholds[np.argmax(tpr - fpr)]  # youden index
-            list_best_threshold_each_timestep.append(best_threshold_curr_timestep)
-            preds_current_timestep_bool = preds_current_timestep > best_threshold_curr_timestep
+            # fpr, tpr, thresholds = roc_curve(trues_current_timestep, preds_current_timestep)
+            # best_threshold_curr_timestep = thresholds[np.argmax(tpr - fpr)]  # youden index
+            preds_current_timestep_bool = preds_current_timestep > self.dict_best_threholds['each_timestep'][current_timestep]
 
             list_accuracy.append(  accuracy_score(trues_current_timestep, preds_current_timestep_bool))
             list_jaccard.append(    jaccard_score(trues_current_timestep, preds_current_timestep_bool))
@@ -110,12 +111,13 @@ class Logger:
         if self.is_calc_ddi:
             # iterate every timestep
             for timestep, (preds_current_timestep, trues_current_timestep, edge_indices_current_timestep) in tqdm(
-                    enumerate(zip(self.list_preds_each_timestep, self.list_trues_each_timestep,
-                                  self.list_edge_indices_each_timestep)), leave=False):
+                    enumerate(zip(self.list_preds_each_timestep, self.list_trues_each_timestep, self.list_edge_indices_each_timestep)),
+                    leave=False
+            ):
                 # iterate every hadm batches
                 for y_pred, y_true, edge_indices in tqdm(zip(preds_current_timestep, trues_current_timestep,
                                                              edge_indices_current_timestep), leave=False):
-                    y_pred_bool = y_pred > list_best_threshold_each_timestep[timestep]
+                    y_pred_bool = y_pred > self.dict_best_threholds['each_timestep'][current_timestep]
                     self.list_ddi_pred[timestep].extend(self.ddi_calculator.calc_ddis_for_batch_admi(y_pred_bool, edge_indices))
                     self.list_ddi_true[timestep].extend(self.ddi_calculator.calc_ddis_for_batch_admi(y_true,      edge_indices))
 

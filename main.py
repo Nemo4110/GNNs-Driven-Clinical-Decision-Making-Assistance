@@ -9,6 +9,7 @@ from d2l import torch as d2l
 from dataset.hgs import MyOwnDataset
 from model.lers import LERS
 from utils.metrics import Logger
+from utils.best_thresholds import BestThreshldLogger
 
 
 if __name__ == '__main__':
@@ -28,17 +29,19 @@ if __name__ == '__main__':
     parser.add_argument("--lr",                           type=float, default=0.0003,    help="learning rate")
 
     # Paths
-    parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs-new", help="path where dataset directory locates")  # in linux
-    parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                   help="path where models save")
-    parser.add_argument("--path_dir_results",   default=r"./results",                     help="path where results save")
+    # parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs-new", help="path where dataset directory locates")  # in linux
+    parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs", help="path where dataset directory locates")  # in linux
+    parser.add_argument("--path_dir_model_hub", default=r"./model/hub",               help="path where models save")
+    parser.add_argument("--path_dir_results",   default=r"./results",                 help="path where results save")
+    parser.add_argument("--path_dir_thresholds",default=r"./thresholds",              help="path where thresholds save")
 
     # Experiment settings
     parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task")
     parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False,     help="specify whether do training")
-    parser.add_argument("--val",              action="store_true",  default=False,     help="specify whether do validating")
-    parser.add_argument("--val_model_state_dict",                   default=None,      help="val only model's state_dict file name")  # must be specified when --train=False!
-    parser.add_argument("--val_num",                      type=int, default=-1,        help="number of verifications")
+    parser.add_argument("--test",             action="store_true",  default=False,     help="specify whether do testing")
+    parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
+    parser.add_argument("--test_num",                     type=int, default=-1,        help="number of testing")
     parser.add_argument("--use_gpu",          action="store_true",  default=False,     help="specify whether to use GPU")
     parser.add_argument("--num_gpu",                      type=int, default=0,         help="specify which GPU to be used firstly")
     parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
@@ -48,7 +51,7 @@ if __name__ == '__main__':
     if not os.path.exists(args.path_dir_model_hub):
         os.mkdir(args.path_dir_model_hub)
     root_path = os.path.join(args.root_path_dataset, f"batch_size_{args.batch_size_by_HADMID}")
-    resl_path = os.path.join(args.path_dir_results, f"#{args.val_num}")
+    resl_path = os.path.join(args.path_dir_results, f"#{args.test_num}")
     if not os.path.exists(resl_path):
         os.mkdir(resl_path)
 
@@ -63,9 +66,10 @@ if __name__ == '__main__':
                  hidden_dim=args.hidden_dim).to(device)
 
     if args.train:
-        train_set = MyOwnDataset(root_path=root_path, usage="train")
+        logger4item_best_thresholds = BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
+        logger4drug_best_thresholds = BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
 
-        # optimizer
+        train_set = MyOwnDataset(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
         # train
@@ -77,6 +81,10 @@ if __name__ == '__main__':
                 optimizer.zero_grad()
                 hg = hg.to(device)
                 list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, _ = model(hg)
+
+                if epoch == (args.epochs - 1):
+                    logger4item_best_thresholds.log(list_scores4item, list_labels4item)
+                    logger4drug_best_thresholds.log(list_scores4drug, list_labels4drug)
 
                 # calculating loss
                 loss4item = torch.tensor(0.0).to(device)
@@ -98,27 +106,31 @@ if __name__ == '__main__':
         model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, f"{model_saving_prefix}_loss={loss:.4f}.pt"))
 
-    # validate
-    if args.val:
-        val_set = MyOwnDataset(root_path=root_path, usage="val")
+        logger4item_best_thresholds.save(prefix=f"4ITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
+        logger4drug_best_thresholds.save(prefix=f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
+
+    # testing
+    if args.test:
+        str_prefix4item = f"4ITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
+        str_prefix4drug = f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
+
+        test_set = MyOwnDataset(root_path=root_path, usage="test")
 
         if not args.train:
-            model_state_dict = torch.load(os.path.join(args.path_dir_model_hub, f"{args.val_model_state_dict}.pt"), map_location=device)
+            model_state_dict = torch.load(os.path.join(args.path_dir_model_hub, f"{args.test_model_state_dict}.pt"), map_location=device)
             model.load_state_dict(model_state_dict)
 
         # metrics loggers
-        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path)
-        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, is_calc_ddi=True)
+        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, best_thresholdspath=os.path.join(args.path_dir_thresholds, f"{str_prefix4item}_best_thresholds.pickle"))
+        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, best_thresholdspath=os.path.join(args.path_dir_thresholds, f"{str_prefix4drug}_best_thresholds.pickle"), is_calc_ddi=True)
 
         model.eval()
         with torch.no_grad():
-            for hg in tqdm(val_set):
+            for hg in tqdm(test_set):
                 hg = hg.to(device)
                 list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug = model(hg)
                 logger4item.log(list_scores4item, list_labels4item)
                 logger4drug.log(list_scores4drug, list_labels4drug, list_edge_indices4drug)
 
-        str_prefix4item = f"4ITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-        str_prefix4drug = f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
         logger4item.save(description=str_prefix4item)
         logger4drug.save(description=str_prefix4drug)

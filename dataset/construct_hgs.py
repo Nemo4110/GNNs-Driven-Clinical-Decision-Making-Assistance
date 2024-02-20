@@ -13,14 +13,14 @@ def get_list_total_hadmid(*list_df_single_edges_type: list):
     Get the interset of hadmid from df(s) which record(s) the edge connection.
     """
     if len(list_df_single_edges_type) <= 1:
-        return list(list_df_single_edges_type[0].HADM_ID.unique())
+        return list(list_df_single_edges_type[0].HADM_ID.sort_values().unique())
     else:
-        list_set_hadmid_single_edges_type = [set(list(df_single_edges_type.HADM_ID.unique()))
+        list_set_hadmid_single_edges_type = [set(list(df_single_edges_type.HADM_ID.sort_values().unique()))
                                              for df_single_edges_type in list_df_single_edges_type]
         return list(set.intersection(*list_set_hadmid_single_edges_type))
 
 
-def get_train_val_test_hadmid_list(list_total_hadmid, split_ratio: float, shuffle: bool):
+def get_train_test_hadmid_list(list_total_hadmid, split_ratio: float, shuffle: bool=False):
     np.random.shuffle(list_total_hadmid) if shuffle else None
 
     length = len(list_total_hadmid)
@@ -204,11 +204,11 @@ if __name__ == "__main__":
     df_drug_ndc_feat = pd.read_csv(os.path.join(path_dataset, "DRUGS_NDC_FEAT.csv.gz"))
 
     list_total_hadmid = get_list_total_hadmid(df_labevents, df_prescriptions)
-    list_train_hadmid, list_val_hadmid = get_train_val_test_hadmid_list(list_total_hadmid, 0.8, shuffle=True)
+    list_train_hadmid, list_test_hadmid = get_train_test_hadmid_list(list_total_hadmid, 0.95)
 
     batch_size = 128
     list_df_admissions_single_batch_train, list_df_labevents_single_batch_train, list_df_prescriptions_single_batch_train = batches_spliter(list_train_hadmid, batch_size, df_admissions, df_labevents, df_prescriptions)
-    list_df_admissions_single_batch_val,   list_df_labevents_single_batch_val,   list_df_prescriptions_single_batch_val   = batches_spliter(list_val_hadmid,   batch_size, df_admissions, df_labevents, df_prescriptions)
+    list_df_admissions_single_batch_test,  list_df_labevents_single_batch_test,  list_df_prescriptions_single_batch_test  = batches_spliter(list_test_hadmid,  batch_size, df_admissions, df_labevents, df_prescriptions)
 
     train_hgs = [construct_dynamic_hetero_graph(df_admissions_single_batch,
                                                 df_labitems,
@@ -227,13 +227,13 @@ if __name__ == "__main__":
                                               df_drug_ndc_feat,
                                               df_prescriptions_single_batch) \
                for df_admissions_single_batch, df_labevents_single_batch, df_prescriptions_single_batch in tqdm(
-            zip(list_df_admissions_single_batch_val,
-                list_df_labevents_single_batch_val,
-                list_df_prescriptions_single_batch_val)
+            zip(list_df_admissions_single_batch_test,
+                list_df_labevents_single_batch_test,
+                list_df_prescriptions_single_batch_test)
         )]
 
-    # path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs"
-    path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs-new"
+    path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs"
+    # path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs-new"
     path_hgs_curr = os.path.join(path_hgs, f'batch_size_{batch_size}')
 
     if os.path.isdir(path_hgs_curr):
@@ -244,6 +244,6 @@ if __name__ == "__main__":
     for idx, train_hg in enumerate(train_hgs):
         torch.save(train_hg, f'{os.path.join(os.path.join(path_hgs_curr, "train"), str(idx))}.pt')
 
-    os.mkdir(os.path.join(path_hgs_curr, "val"))
+    os.mkdir(os.path.join(path_hgs_curr, "test"))
     for idx, train_hg in enumerate(val_hgs):
-        torch.save(train_hg, f'{os.path.join(os.path.join(path_hgs_curr, "val"), str(idx))}.pt')
+        torch.save(train_hg, f'{os.path.join(os.path.join(path_hgs_curr, "test"), str(idx))}.pt')

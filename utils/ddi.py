@@ -6,18 +6,24 @@ import pandas as pd
 import os
 import pickle
 import torch
-
-from queue import Queue
+import dill
 
 
 class DDICalculator:
     def __init__(self, 
                  path_ddi_dataset=r"/data/data2/041/datasets/DDI") -> None:
-        self.df_map_of_idx4ndc_rxcui_atc4_cids = pd.read_csv(os.path.join(path_ddi_dataset, "MAP_IDX4NDC_RXCUI_ATC4_CIDS.csv"))
+        # use `index_col=0` argument to avoid `unnamed :0`
+        # <https://stackoverflow.com/questions/53988226/pd-read-csv-add-column-named-unnamed-0>
+        self.df_map_of_idx4ndc_rxcui_atc4_cids = pd.read_csv(os.path.join(path_ddi_dataset, "MAP_IDX4NDC_RXCUI_ATC4_CIDS.csv"), index_col=0)
+        self.df_map_of_idx4ndc_rxcui_atc4_cids = self.df_map_of_idx4ndc_rxcui_atc4_cids.drop(columns=['list_cid', 'list_cid_idx'])
         self.df_map_of_idx4ndc_rxcui_atc4_cids.sort_values(by='idx', inplace=True)
 
-        with open(os.path.join(path_ddi_dataset, "ddi_adj_matrix.pickle"), 'rb') as f:
-            self.ddi_adj = pickle.load(f)
+        with open(os.path.join(path_ddi_dataset, "voc_final.pkl"), 'rb') as f:
+            self.med_voc = dill.load(f)['med_voc']
+        self.med_unique_word = list(self.med_voc.word2idx.keys())
+
+        with open(os.path.join(path_ddi_dataset, "ddi_A_final.pkl"), 'rb') as f:
+            self.ddi_adj = dill.load(f)
 
     def calc_ddis_for_batch_admi(self, edge_labels, edge_indices):
         existing_edge_indices = torch.index_select(edge_indices, dim=1, index=torch.nonzero(edge_labels).flatten())
@@ -32,27 +38,30 @@ class DDICalculator:
         return ddis
 
     def calc_ddi_rate(self, durg_idxes_curr_admi: torch.tensor):
+        # `durg_idxes_curr_admi`: the indeices of drugs of current patient, waiting to calculate the DDI score
         mask = self.df_map_of_idx4ndc_rxcui_atc4_cids.idx.isin(durg_idxes_curr_admi.tolist())  # MUST tolist !!!
         df_drugs_curr_admi = self.df_map_of_idx4ndc_rxcui_atc4_cids.loc[mask]
-        df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.list_cid_idx.notnull()]
 
-        q = Queue()
-        for list_cid_idx in list(df_drugs_can_calc_ddi.list_cid_idx.values):
-            q.put(list_cid_idx)
+        df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.ATC4.notnull()]
 
-        cnt_all_pair = 0
-        cnt_ddi_pair = 0
-        while q.qsize() > 1:
-            list_curr_cid_idx = q.get()
-            for curr_cid_idx in eval(list_curr_cid_idx):
-                list_other_cid_idx = []
-                for elm in q.queue:
-                    list_other_cid_idx.extend(eval(elm))
+        df_drugs_can_calc_ddi['ATC3'] = df_drugs_can_calc_ddi['ATC4'].map(lambda x: x[:4])
+        df_drugs_can_calc_ddi = df_drugs_can_calc_ddi[df_drugs_can_calc_ddi.ATC3.isin(self.med_unique_word)]  # ATC3 = ATC4[:4]
+        atc3s = df_drugs_can_calc_ddi.ATC3.unique()
 
-                for other_cid_idx in list_other_cid_idx:
-                    if self.ddi_adj[curr_cid_idx][other_cid_idx] > 0 or \
-                       self.ddi_adj[other_cid_idx][curr_cid_idx] > 0:
-                        cnt_ddi_pair += 1
-                    cnt_all_pair += 1
-                    
-        return 0 if cnt_all_pair == 0 else cnt_ddi_pair / cnt_all_pair
+        cnt_all = 0
+        cnt_ddi = 0
+        for i, atc3_i in enumerate(atc3s):
+            idx_drug_i = self.med_voc.word2idx[atc3_i]
+
+            for j, atc3_j in enumerate(atc3s):
+                if j <= i: continue
+                cnt_all += 1
+
+                idx_drug_j = self.med_voc.word2idx[atc3_j]
+                if self.ddi_adj[idx_drug_i, idx_drug_j] == 1 or \
+                   self.ddi_adj[idx_drug_j, idx_drug_i] == 1:
+                    cnt_ddi += 1
+
+        if cnt_all == 0:
+            return 0
+        return cnt_ddi / cnt_all
