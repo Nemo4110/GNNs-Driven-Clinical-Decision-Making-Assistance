@@ -44,7 +44,7 @@ class DDICalculator:
 
         df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.ATC4.notnull()]
 
-        df_drugs_can_calc_ddi['ATC3'] = df_drugs_can_calc_ddi['ATC4'].map(lambda x: x[:4])
+        df_drugs_can_calc_ddi.loc[:, 'ATC3'] = df_drugs_can_calc_ddi['ATC4'].map(lambda x: x[:4])
         df_drugs_can_calc_ddi = df_drugs_can_calc_ddi[df_drugs_can_calc_ddi.ATC3.isin(self.med_unique_word)]  # ATC3 = ATC4[:4]
         atc3s = df_drugs_can_calc_ddi.ATC3.unique()
 
