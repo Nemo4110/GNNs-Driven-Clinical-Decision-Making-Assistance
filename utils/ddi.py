@@ -16,6 +16,11 @@ class DDICalculator:
         # <https://stackoverflow.com/questions/53988226/pd-read-csv-add-column-named-unnamed-0>
         self.df_map_of_idx4ndc_rxcui_atc4_cids = pd.read_csv(os.path.join(path_ddi_dataset, "MAP_IDX4NDC_RXCUI_ATC4_CIDS.csv"), index_col=0)
         self.df_map_of_idx4ndc_rxcui_atc4_cids = self.df_map_of_idx4ndc_rxcui_atc4_cids.drop(columns=['list_cid', 'list_cid_idx'])
+
+        # https://stackoverflow.com/questions/20625582/
+        pd.options.mode.chained_assignment = None  # default='warn'
+        self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC3'] = self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC4'].copy().map(lambda x: x[:4])
+
         self.df_map_of_idx4ndc_rxcui_atc4_cids.sort_values(by='idx', inplace=True)
 
         with open(os.path.join(path_ddi_dataset, "voc_final.pkl"), 'rb') as f:
@@ -42,10 +47,8 @@ class DDICalculator:
         mask = self.df_map_of_idx4ndc_rxcui_atc4_cids.idx.isin(durg_idxes_curr_admi.tolist())  # MUST tolist !!!
         df_drugs_curr_admi = self.df_map_of_idx4ndc_rxcui_atc4_cids.loc[mask]
 
-        df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.ATC4.notnull()]
-
-        df_drugs_can_calc_ddi.loc[:, 'ATC3'] = df_drugs_can_calc_ddi['ATC4'].map(lambda x: x[:4])
-        df_drugs_can_calc_ddi = df_drugs_can_calc_ddi[df_drugs_can_calc_ddi.ATC3.isin(self.med_unique_word)]  # ATC3 = ATC4[:4]
+        df_drugs_can_calc_ddi = df_drugs_curr_admi[df_drugs_curr_admi.ATC3.notnull()]
+        df_drugs_can_calc_ddi = df_drugs_can_calc_ddi[df_drugs_can_calc_ddi.ATC3.isin(self.med_unique_word)]
         atc3s = df_drugs_can_calc_ddi.ATC3.unique()
 
         cnt_all = 0
