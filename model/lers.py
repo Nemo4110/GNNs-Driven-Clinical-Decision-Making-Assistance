@@ -184,8 +184,7 @@ class LERS(nn.Module):
 
         mask_next_t4item = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
         sub_hg.labels4item_pos_index = hg["admission", "did", "labitem"].edge_index[:, mask_next_t4item].clone()
-        sub_hg.labels4item_neg_index = negative_sampling(sub_hg.labels4item_pos_index,
-                                                         num_neg_samples=sub_hg.labels4item_pos_index.shape[1] * 2,
+        sub_hg.labels4item_neg_index = negative_sampling(sub_hg.labels4item_pos_index,                                                         num_neg_samples=sub_hg["admission"].node_id.shape[0] * 30,  # each admission would have 30 negative candidate labtis
                                                          num_nodes=(sub_hg["admission"].node_id.shape[0],
                                                                     sub_hg["labitem"].node_id.shape[0])).to(device)
         sub_hg.lables4item_index = torch.cat((sub_hg.labels4item_pos_index, sub_hg.labels4item_neg_index), dim=1)
@@ -198,7 +197,7 @@ class LERS(nn.Module):
         mask_next_t4drug = (hg["admission", "took", "drug"].timestep == (timestep+1)).to(device)
         sub_hg.labels4drug_pos_index = hg["admission", "took", "drug"].edge_index[:, mask_next_t4drug].clone()
         sub_hg.labels4drug_neg_index = negative_sampling(sub_hg.labels4drug_pos_index,
-                                                         num_neg_samples=sub_hg.labels4drug_pos_index.shape[1] * 2,
+                                                         num_neg_samples=sub_hg["admission"].node_id.shape[0] * 30,
                                                          num_nodes=(sub_hg["admission"].node_id.shape[0],
                                                                     sub_hg["drug"].node_id.shape[0])).to(device)
         sub_hg.labels4drug_index = torch.cat((sub_hg.labels4drug_pos_index, sub_hg.labels4drug_neg_index), dim=1)
