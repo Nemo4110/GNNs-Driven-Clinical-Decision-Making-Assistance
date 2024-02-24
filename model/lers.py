@@ -88,6 +88,7 @@ class LERS(nn.Module):
                  max_timestep: int,
                  gnn_type: str,
                  # num_admissions: int,
+                 neg_smp_strategy: int,
                  num_labitems: int = 753,
                  num_drugs: int = 4294,
                  num_decoder_layers_admission=6,
@@ -100,6 +101,8 @@ class LERS(nn.Module):
         self.gnn_type = gnn_type
 
         # self.num_admissions = num_admissions
+        self.neg_smp_strategy = neg_smp_strategy
+
         self.num_labitems = num_labitems
         self.num_drugs    = num_drugs
 
@@ -148,7 +151,13 @@ class LERS(nn.Module):
                 nn.init.xavier_normal_(weight)
 
     @staticmethod
-    def get_subgraph_by_timestep(hg: HeteroData, timestep: int):
+    def get_subgraph_by_timestep(hg: HeteroData, timestep: int, neg_smp_strategy: int=0):
+        r"""
+        Params:
+            - `neg_smp_stratege`: the stratege of negative sampling
+                - \in [1, 100], assume each patient is assigned with `neg_smp_stratege` negative edges
+                - 0 for 1: 2 (positive: negative)
+        """
         device = hg["admission", "did", "labitem"].timestep.device
 
         # https://discuss.pytorch.org/t/typeerror-expected-tensoroptions-dtype-float-device-cpu-layout-strided-requires-grad-false-default-pinned-memory-false-default-memory-format-nullopt/159558
@@ -184,9 +193,20 @@ class LERS(nn.Module):
 
         mask_next_t4item = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
         sub_hg.labels4item_pos_index = hg["admission", "did", "labitem"].edge_index[:, mask_next_t4item].clone()
-        sub_hg.labels4item_neg_index = negative_sampling(sub_hg.labels4item_pos_index,                                                         num_neg_samples=sub_hg["admission"].node_id.shape[0] * 30,  # each admission would have 30 negative candidate labtis
-                                                         num_nodes=(sub_hg["admission"].node_id.shape[0],
-                                                                    sub_hg["labitem"].node_id.shape[0])).to(device)
+        if neg_smp_strategy == 0:
+            sub_hg.labels4item_neg_index = negative_sampling(
+                sub_hg.labels4item_pos_index,
+                num_neg_samples=sub_hg.labels4item_pos_index.shape[1] * 2,
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
+            ).to(device)
+        elif 1 <= neg_smp_strategy <= 100:
+            sub_hg.labels4item_neg_index = negative_sampling(
+                sub_hg.labels4item_pos_index,
+                num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
+            ).to(device)
+        else:
+            raise ValueError
         sub_hg.lables4item_index = torch.cat((sub_hg.labels4item_pos_index, sub_hg.labels4item_neg_index), dim=1)
         sub_hg.lables4item = torch.cat((torch.ones(sub_hg.labels4item_pos_index.shape[1]),
                                         torch.zeros(sub_hg.labels4item_neg_index.shape[1])), dim=0).to(device)
@@ -196,10 +216,20 @@ class LERS(nn.Module):
 
         mask_next_t4drug = (hg["admission", "took", "drug"].timestep == (timestep+1)).to(device)
         sub_hg.labels4drug_pos_index = hg["admission", "took", "drug"].edge_index[:, mask_next_t4drug].clone()
-        sub_hg.labels4drug_neg_index = negative_sampling(sub_hg.labels4drug_pos_index,
-                                                         num_neg_samples=sub_hg["admission"].node_id.shape[0] * 30,
-                                                         num_nodes=(sub_hg["admission"].node_id.shape[0],
-                                                                    sub_hg["drug"].node_id.shape[0])).to(device)
+        if neg_smp_strategy == 0:
+            sub_hg.labels4drug_neg_index = negative_sampling(
+                sub_hg.labels4drug_pos_index,
+                num_neg_samples=sub_hg.labels4drug_pos_index.shape[1] * 2,
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
+            ).to(device)
+        elif 1 <= neg_smp_strategy <= 100:
+            sub_hg.labels4drug_neg_index = negative_sampling(
+                sub_hg.labels4drug_pos_index,
+                num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
+            ).to(device)
+        else:
+            raise ValueError
         sub_hg.labels4drug_index = torch.cat((sub_hg.labels4drug_pos_index, sub_hg.labels4drug_neg_index), dim=1)
         sub_hg.labels4drug = torch.cat((torch.ones(sub_hg.labels4drug_pos_index.shape[1]),
                                         torch.zeros(sub_hg.labels4drug_neg_index.shape[1])), dim=0).to(device)
@@ -215,7 +245,7 @@ class LERS(nn.Module):
         return sub_hg
 
     def forward(self, hg: HeteroData):
-        hgs = [self.get_subgraph_by_timestep(hg, timestep=t) for t in range(self.max_timestep)]
+        hgs = [self.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy) for t in range(self.max_timestep)]
 
         list_dict_node_feats = [{'admission': self.proj_admission(hg['admission'].x),
                                  'labitem':   self.proj_labitem(hg['labitem'].x) + self.labitem_embedding(hg['labitem'].node_id),

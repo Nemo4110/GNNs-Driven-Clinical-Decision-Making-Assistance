@@ -45,7 +45,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_gpu",          action="store_true",  default=False,     help="specify whether to use GPU")
     parser.add_argument("--num_gpu",                      type=int, default=0,         help="specify which GPU to be used firstly")
     parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
-
+    parser.add_argument("--neg_smp_strategy",             type=int, default=0,         help="the stratege of negative sampling")
     args = parser.parse_args()
 
     if not os.path.exists(args.path_dir_model_hub):
@@ -63,7 +63,8 @@ if __name__ == '__main__':
                  num_decoder_layers_admission=args.num_decoder_layers_admission,
                  num_decoder_layers_labitem=args.num_decoder_layers_labitem,
                  num_decoder_layers_drug=args.num_decoder_layers_drug,
-                 hidden_dim=args.hidden_dim).to(device)
+                 hidden_dim=args.hidden_dim,
+                 neg_smp_strategy=args.neg_smp_strategy).to(device)
 
     if args.train:
         logger4item_best_thresholds = BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)

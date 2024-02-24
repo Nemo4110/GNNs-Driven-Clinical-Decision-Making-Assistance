@@ -2,11 +2,13 @@ r"""
 Class used to calculate the DDI.
 """
 
-import pandas as pd
 import os
 import pickle
 import torch
 import dill
+import pandas as pd
+# https://stackoverflow.com/questions/20625582/
+pd.options.mode.chained_assignment = None  # default='warn'
 
 
 class DDICalculator:
@@ -17,9 +19,7 @@ class DDICalculator:
         self.df_map_of_idx4ndc_rxcui_atc4_cids = pd.read_csv(os.path.join(path_ddi_dataset, "MAP_IDX4NDC_RXCUI_ATC4_CIDS.csv"), index_col=0)
         self.df_map_of_idx4ndc_rxcui_atc4_cids = self.df_map_of_idx4ndc_rxcui_atc4_cids.drop(columns=['list_cid', 'list_cid_idx'])
 
-        # https://stackoverflow.com/questions/20625582/
-        pd.options.mode.chained_assignment = None  # default='warn'
-        self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC3'] = self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC4'].copy().map(lambda x: x[:4])
+        self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC3'] = self.df_map_of_idx4ndc_rxcui_atc4_cids['ATC4'].map(lambda x: x[:4], na_action='ignore')
 
         self.df_map_of_idx4ndc_rxcui_atc4_cids.sort_values(by='idx', inplace=True)
 
