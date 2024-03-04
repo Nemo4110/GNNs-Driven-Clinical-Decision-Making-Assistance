@@ -1,8 +1,6 @@
-# DTDG4EHR
+# Installation of environment
 
-## Installation of environment
-
-### Prerequisites :warning:
+## Prerequisites :warning:
 
 - A Nvidia `GPU` with enough memory.
   - In our case, we use 3090 that has about 24 GB memory, and the CUDA version is 11.3.
@@ -14,15 +12,15 @@
 Data Use Agreement 1.5.0 - Data Use Agreement for the
 MIMIC-III Clinical Database (v1.4)* to get the accessment of dataset. 
 
-### Steps
+## Steps
 
 In the CMD:
 
 1. Create conda environment:
 
     ```shell
-    conda create DTDG4EHR python==3.9.0
-    conda activate DTDG4EHR
+    conda create <env_name> python==3.9.0
+    conda activate <env_name>
     ```
 
 2. Install dependencies:
@@ -40,9 +38,9 @@ In the CMD:
     pip install dill
     ```
 
-## Usage
+# Usage
 
-### data preprocess pipeline
+## data preprocess pipeline
 
 - Modify the `path_dataset` parameter in the both `preprocess_drugs.py` adn `preprocess_labitems.py` according to the path where you store the `mimic-iii v1.4` dataset.
   - as well as modify the `path_ddi_dataset` parameter in `preprocess_drugs.py`, it specifies where you store the `ndc2rxnorm_mapping.txt` file
@@ -52,7 +50,7 @@ In the CMD:
     - the original context of `DDI` directory can be downloaded at: <https://github.com/BarryRun/COGNet/tree/master/data>
   - Some unit cells in `processes.ipynb` may run out of time, this is why we recommend to use the equivalent `preprocess_drugs.py` adn `preprocess_labitems.py` scripts instead.
 
-### dataset split
+## dataset split
 
 In the `construct_graph.py`, there are 3 parameter need to modify:
 
@@ -62,7 +60,7 @@ In the `construct_graph.py`, there are 3 parameter need to modify:
 
 Run all unit cells! DONE.
 
-### train and test
+## train and test
 
 After finishing above, modify the default value of `root_path_dataset` in `main.py` according to the path where you store the $\mathcal{DTDG}$s.
 
