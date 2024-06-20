@@ -19,7 +19,7 @@ In the CMD:
 1. Create conda environment:
 
     ```shell
-    conda create <env_name> python==3.9.0
+    conda create --name <env_name> python==3.9.0
     conda activate <env_name>
     ```
 
