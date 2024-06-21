@@ -48,12 +48,12 @@ if __name__ == '__main__':
     parser.add_argument("--neg_smp_strategy",             type=int, default=0,         help="the stratege of negative sampling")
     args = parser.parse_args()
 
-    if not os.path.exists(args.path_dir_model_hub):
-        os.mkdir(args.path_dir_model_hub)
     root_path = os.path.join(args.root_path_dataset, f"batch_size_{args.batch_size_by_HADMID}")
     resl_path = os.path.join(args.path_dir_results, f"#{args.test_num}")
-    if not os.path.exists(resl_path):
-        os.mkdir(resl_path)
+
+    if not os.path.exists(resl_path):               os.mkdir(resl_path)
+    if not os.path.exists(args.path_dir_model_hub): os.mkdir(args.path_dir_model_hub)
+    if not os.path.exists(args.path_dir_thresholds):os.mkdir(args.path_dir_thresholds)
 
     device = d2l.try_gpu(args.num_gpu) if args.use_gpu else torch.device('cpu')
 
