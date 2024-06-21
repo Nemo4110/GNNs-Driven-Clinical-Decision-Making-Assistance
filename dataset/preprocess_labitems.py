@@ -1,10 +1,11 @@
 r"""
 A separate script for preprocessing data, same function as `processes_labitems.ipynb`.
 """
-
+import sys; sys.path.append("..")
 import os.path as path
 import numpy as np
 import pandas as pd
+import utils.constant as constant
 
 from tqdm import tqdm
 from datetime import datetime, timedelta
@@ -221,13 +222,14 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 
 
 if __name__ == "__main__":
-    path_dataset = r"/data/data2/041/datasets/mimic-iii-clinical-database-1.4"
+    path_dataset = constant.PATH_MIMIC_III
+    path_dst_csv = constant.PATH_MIMIC_III_ETL_OUTPUT
     preprocess_admission(src_csv_path=path.join(path_dataset, "ADMISSIONS.csv.gz"),
-                         dst_csv_path=path.join(path_dataset, "ADMISSIONS_NEW.csv.gz"))
+                         dst_csv_path=path.join(path_dst_csv, "ADMISSIONS_NEW.csv.gz"))
 
     preprocess_labitems(src_csv_path=path.join(path_dataset, "D_LABITEMS.csv.gz"),
-                        dst_csv_path=path.join(path_dataset, "D_LABITEMS_NEW.csv.gz"))
+                        dst_csv_path=path.join(path_dst_csv, "D_LABITEMS_NEW.csv.gz"))
 
     preprocess_labevents(src_csv_path=path.join(path_dataset, "LABEVENTS.csv.gz"),
-                         dst_csv_path=path.join(path_dataset, "LABEVENTS_PREPROCESSED.csv.gz"),
+                         dst_csv_path=path.join(path_dst_csv, "LABEVENTS_PREPROCESSED.csv.gz"),
                          src_csv_path_admi=path.join(path_dataset, "ADMISSIONS.csv.gz"))

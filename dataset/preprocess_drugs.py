@@ -1,13 +1,17 @@
 import pandas as pd
 import os
 import numpy as np
+import sys; sys.path.append("..")
+import utils.constant as constant
 
 from tqdm import tqdm
 from datetime import datetime, timedelta
 
 
-path_dataset = r"/data/data2/041/datasets/mimic-iii-clinical-database-1.4"
-path_ddi_dataset = r"/data/data2/041/datasets/DDI"
+path_dataset = constant.PATH_MIMIC_III
+path_ddi_dataset = constant.PATH_DDI_DATA
+path_etl_output = constant.PATH_MIMIC_III_ETL_OUTPUT
+
 df_admissions = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS.csv.gz"))
 df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
 df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
@@ -280,13 +284,13 @@ if __name__ == "__main__":
     df_prescriptions["ROUTE"]          = df_prescriptions["ROUTE"         ].astype("string").str.upper()
 
     df_prescriptions = ndc0_mapping_handler(df_prescriptions)
-    df_prescriptions = duration_issuse_handler(df_prescriptions); # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_DURATION_SOLVED.csv.gz"))
-    df_prescriptions = ncv_converting_handler(df_prescriptions);  # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_NCV_SOLVED.csv.gz"))
-    df_prescriptions = adding_timestep_handler(df_prescriptions); # df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_TIMESTEP_SOLVED.csv.gz"))
+    df_prescriptions = duration_issuse_handler(df_prescriptions)#; df_prescriptions.to_csv(os.path.join(path_etl_output, "PRESCRIPTIONS_DURATION_SOLVED.csv.gz"))
+    df_prescriptions = ncv_converting_handler(df_prescriptions) #; df_prescriptions.to_csv(os.path.join(path_etl_output, "PRESCRIPTIONS_NCV_SOLVED.csv.gz"))
+    df_prescriptions = adding_timestep_handler(df_prescriptions)#; df_prescriptions.to_csv(os.path.join(path_etl_output, "PRESCRIPTIONS_TIMESTEP_SOLVED.csv.gz"))
     df_prescriptions = repeating_edges_handler(df_prescriptions)
 
-    df_prescriptions.to_csv(os.path.join(path_dataset, "PRESCRIPTIONS_PREPROCESSED.csv.gz"))
+    df_prescriptions.to_csv(os.path.join(path_etl_output, "PRESCRIPTIONS_PREPROCESSED.csv.gz"))
 
-    df_drug_node_feature_per_ndc_final = drugs_node_features_handler(pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS_PREPROCESSED.csv.gz")))
-    df_drug_node_feature_per_ndc_final.to_csv(os.path.join(path_dataset, "DRUGS_NDC_FEAT.csv.gz"))
+    df_drug_node_feature_per_ndc_final = drugs_node_features_handler(pd.read_csv(os.path.join(path_etl_output, "PRESCRIPTIONS_PREPROCESSED.csv.gz")))
+    df_drug_node_feature_per_ndc_final.to_csv(os.path.join(path_etl_output, "DRUGS_NDC_FEAT.csv.gz"))
 
