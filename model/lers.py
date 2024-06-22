@@ -15,25 +15,27 @@ from model.position_encoding import PositionalEncoding
 
 
 class SingelGnn(nn.Module):
-    def __init__(self, hidden_dim, gnn_type):
+    r"""Chosen from this cheatsheet: <https://pytorch-geometric.readthedocs.io/en/latest/notes/cheatsheet.html>"""
+    def __init__(self, hidden_dim, gnn_type, gnn_layer_num: int = 2):
         super().__init__()
+        assert gnn_layer_num > 0
         self.hidden_dim = hidden_dim
 
         if gnn_type == "GINEConv":
-            self.conv1 = GINEConv(nn=nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim))
-            self.conv2 = GINEConv(nn=nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim))
+            self.layers = nn.ModuleList([GINEConv(nn=nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim))
+                                         for _ in range(gnn_layer_num)])
         elif gnn_type == "GENConv":
-            self.conv1 = GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
-            self.conv2 = GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
+            self.layers = nn.ModuleList([GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
+                                         for _ in range(gnn_layer_num)])
         elif gnn_type == "GATConv":
-            self.conv1 = GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
-            self.conv2 = GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
+            self.layers = nn.ModuleList([GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
+                                         for _ in range(gnn_layer_num)])
         else:
             raise f"Do not support arg:gnn_type={gnn_type} now!"
 
     def forward(self, node_feats, edge_index, edge_attrs):
-        node_feats = self.conv1(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
-        node_feats = self.conv2(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
+        for conv in self.layers:
+            node_feats = conv.forward(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
         return node_feats
 
 
@@ -41,12 +43,13 @@ class MultiGnns(nn.Module):
     def __init__(self,
                  hidden_dim: int,
                  max_timestep: int,
-                 gnn_type: str):
+                 gnn_type: str,
+                 gnn_layer_num: int = 2):
         super().__init__()
 
         # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cpu and cuda:0!
         # Solution: use the `nn.ModuleList` instead of list
-        self.gnns = nn.ModuleList([SingelGnn(hidden_dim=hidden_dim, gnn_type=gnn_type)
+        self.gnns = nn.ModuleList([SingelGnn(hidden_dim=hidden_dim, gnn_type=gnn_type, gnn_layer_num=gnn_layer_num)
                                    for _ in range(max_timestep)])  # as many fc as max_timestep
 
         node_types = ['admission', 'labitem', 'drug']
@@ -94,11 +97,13 @@ class LERS(nn.Module):
                  num_decoder_layers_admission=6,
                  num_decoder_layers_labitem=6,
                  num_decoder_layers_drug=6,
-                 hidden_dim: int = 128):
+                 hidden_dim: int = 128,
+                 gnn_layer_num: int = 2):
         super().__init__()
 
         self.max_timestep = max_timestep
         self.gnn_type = gnn_type
+        self.gnn_layer_num = gnn_layer_num
 
         # self.num_admissions = num_admissions
         self.neg_smp_strategy = neg_smp_strategy
@@ -130,7 +135,7 @@ class LERS(nn.Module):
         self.proj_edge_attr      = nn.Linear(in_features=2, out_features=self.hidden_dim)
         self.proj_edge_attr4drug = nn.Linear(in_features=7, out_features=self.hidden_dim)
 
-        self.gnns = MultiGnns(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep, gnn_type=self.gnn_type)
+        self.gnns = MultiGnns(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep, gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num)
 
         self.decoder_layers_admission = nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512)
         self.decoder_layers_labitem   = nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512)

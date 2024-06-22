@@ -24,6 +24,7 @@ if __name__ == '__main__':
     #       would trigger the assert error "last timestep has not labels!"
     #       in `get_subgraph_by_timestep` in lers.py
     parser.add_argument("--gnn_type",                                 default="GENConv", help="Specify the `conv` that being used as MessagePassing")
+    parser.add_argument("--gnn_layer_num",                type=int,   default=2,         help="Number of gnn layers")
     parser.add_argument("--num_decoder_layers_admission", type=int,   default=6,         help="Number of decoder layers for admission")
     parser.add_argument("--num_decoder_layers_labitem",   type=int,   default=6,         help="Number of decoder layers for labitem")
     parser.add_argument("--num_decoder_layers_drug",      type=int,   default=6,         help="Number of decoder layers for drug")
@@ -62,6 +63,7 @@ if __name__ == '__main__':
     # model
     model = LERS(max_timestep=args.max_timestep,
                  gnn_type=args.gnn_type,
+                 gnn_layer_num=args.gnn_layer_num,
                  num_decoder_layers_admission=args.num_decoder_layers_admission,
                  num_decoder_layers_labitem=args.num_decoder_layers_labitem,
                  num_decoder_layers_drug=args.num_decoder_layers_drug,
