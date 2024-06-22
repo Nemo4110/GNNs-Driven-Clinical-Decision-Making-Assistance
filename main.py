@@ -3,6 +3,8 @@ import os
 import torch
 import torch.nn.functional as F
 
+import utils.constant as constant
+
 from tqdm import tqdm
 from d2l import torch as d2l
 
@@ -30,10 +32,10 @@ if __name__ == '__main__':
 
     # Paths
     # parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs-new", help="path where dataset directory locates")  # in linux
-    parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs", help="path where dataset directory locates")  # in linux
-    parser.add_argument("--path_dir_model_hub", default=r"./model/hub",               help="path where models save")
-    parser.add_argument("--path_dir_results",   default=r"./results",                 help="path where results save")
-    parser.add_argument("--path_dir_thresholds",default=r"./thresholds",              help="path where thresholds save")
+    parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
+    parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                     help="path where models save")
+    parser.add_argument("--path_dir_results",   default=r"./results",                       help="path where results save")
+    parser.add_argument("--path_dir_thresholds",default=r"./thresholds",                    help="path where thresholds save")
 
     # Experiment settings
     parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task")

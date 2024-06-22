@@ -3,6 +3,7 @@ import pandas as pd
 import os, shutil
 import torch
 import numpy as np
+import utils.constant as constant
 
 from tqdm import tqdm
 from torch_geometric.data import HeteroData
@@ -195,7 +196,7 @@ def construct_dynamic_hetero_graph(df_admissions_curr,
 
 
 if __name__ == "__main__":
-    path_dataset = r"/data/data2/041/datasets/mimic-iii-clinical-database-1.4"
+    path_dataset = constant.PATH_MIMIC_III_ETL_OUTPUT
 
     df_admissions    = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS_NEW.csv.gz"))
     df_labitems      = pd.read_csv(os.path.join(path_dataset, "D_LABITEMS_NEW.csv.gz"))
@@ -232,8 +233,7 @@ if __name__ == "__main__":
                 list_df_prescriptions_single_batch_test)
         )]
 
-    path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs"
-    # path_hgs = r"/data/data2/041/datasets/mimic-iii-hgs-new"
+    path_hgs = constant.PATH_MIMIC_III_HGS_OUTPUT
     path_hgs_curr = os.path.join(path_hgs, f'batch_size_{batch_size}')
 
     if os.path.isdir(path_hgs_curr):
