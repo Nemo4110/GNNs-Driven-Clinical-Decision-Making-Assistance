@@ -205,6 +205,12 @@ class LERS(nn.Module):
                 num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
                 num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
             ).to(device)
+        elif neg_smp_strategy == -1:  # use the full labitem set
+            sub_hg.labels4item_neg_index = negative_sampling(
+                sub_hg.labels4item_pos_index,
+                num_neg_samples=sub_hg["admission"].node_id.shape[0] * sub_hg["labitem"].node_id.shape[0],
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
+            ).to(device)
         else:
             raise ValueError
         sub_hg.lables4item_index = torch.cat((sub_hg.labels4item_pos_index, sub_hg.labels4item_neg_index), dim=1)
@@ -226,6 +232,12 @@ class LERS(nn.Module):
             sub_hg.labels4drug_neg_index = negative_sampling(
                 sub_hg.labels4drug_pos_index,
                 num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
+                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
+            ).to(device)
+        elif neg_smp_strategy == -1:  # use the full labitem set
+            sub_hg.labels4drug_neg_index = negative_sampling(
+                sub_hg.labels4drug_pos_index,
+                num_neg_samples=sub_hg["admission"].node_id.shape[0] * sub_hg["drug"].node_id.shape[0],
                 num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
             ).to(device)
         else:
