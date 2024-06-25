@@ -9,9 +9,11 @@ from torch_geometric.data import HeteroData
 from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
 from torch_geometric.nn import to_hetero
 from torch_geometric.utils import negative_sampling
+from typing import List, Dict, Tuple
 
 from dataset.hgs import MyOwnDataset
 from model.position_encoding import PositionalEncoding
+from utils.config import HeteroGraphConfig
 
 
 class SingelGnn(nn.Module):
@@ -44,7 +46,10 @@ class MultiGnns(nn.Module):
                  hidden_dim: int,
                  max_timestep: int,
                  gnn_type: str,
-                 gnn_layer_num: int = 2):
+                 node_types: List[str],
+                 edge_types: List[Tuple[str]],
+                 gnn_layer_num: int = 2,
+                 ):
         super().__init__()
 
         # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cpu and cuda:0!
@@ -52,9 +57,9 @@ class MultiGnns(nn.Module):
         self.gnns = nn.ModuleList([SingelGnn(hidden_dim=hidden_dim, gnn_type=gnn_type, gnn_layer_num=gnn_layer_num)
                                    for _ in range(max_timestep)])  # as many fc as max_timestep
 
-        node_types = ['admission', 'labitem', 'drug']
-        edge_types = [('admission', 'did', 'labitem'), ('labitem', 'rev_did', 'admission'),
-                      ("admission", "took", "drug"), ("drug", "rev_took", "admission")]
+        # node_types = ['admission', 'labitem', 'drug']
+        # edge_types = [('admission', 'did', 'labitem'), ('labitem', 'rev_did', 'admission'),
+        #               ("admission", "took", "drug"), ("drug", "rev_took", "admission")]
 
         # !!! Warning: here must use `self.gnns[i]`, if we use `gnn` will cause failure of `to_hetero`,
         #              because the `gnn` are temp parameter!
@@ -90,13 +95,21 @@ class LERS(nn.Module):
     def __init__(self,
                  max_timestep: int,
                  gnn_type: str,
-                 # num_admissions: int,
                  neg_smp_strategy: int,
+
+                 node_types: List[str],
+                 edge_types: List[Tuple[str]],
+
                  num_labitems: int = 753,
                  num_drugs: int = 4294,
-                 num_decoder_layers_admission=6,
-                 num_decoder_layers_labitem=6,
-                 num_decoder_layers_drug=6,
+
+                 dim_in_feat_node_admission: int = 8,
+                 dim_in_feat_node_labitem: int = 2,
+                 dim_in_feat_node_drug: int = 8,
+                 dim_in_feat_edge_admi_did_labitem: int = 2,
+                 dim_in_feat_edge_admi_tool_drug: int = 7,
+
+                 num_decoder_layers=6,
                  hidden_dim: int = 128,
                  gnn_layer_num: int = 2):
         super().__init__()
@@ -104,49 +117,69 @@ class LERS(nn.Module):
         self.max_timestep = max_timestep
         self.gnn_type = gnn_type
         self.gnn_layer_num = gnn_layer_num
-
-        # self.num_admissions = num_admissions
         self.neg_smp_strategy = neg_smp_strategy
 
-        self.num_labitems = num_labitems
-        self.num_drugs    = num_drugs
+        self.node_types = node_types
+        self.edge_types = edge_types
 
-        self.num_decoder_layers_admission = num_decoder_layers_admission
-        self.num_decoder_layers_labitem   = num_decoder_layers_labitem
-        self.num_decoder_layers_drug      = num_decoder_layers_drug
-
+        self.node_type_to_node_num = {
+            "labitem": num_labitems,
+            "drug":    num_drugs
+        }
+        self.node_type_to_dim_in_feat_node = {
+            "admission": dim_in_feat_node_admission,
+            "labitem":   dim_in_feat_node_labitem,
+            "drug":      dim_in_feat_node_drug
+        }
+        self.edge_type_to_dim_in_feat_edge = {
+            ('admission', 'did', 'labitem'):     dim_in_feat_edge_admi_did_labitem,
+            ('labitem', 'rev_did', 'admission'): dim_in_feat_edge_admi_did_labitem,
+            ("admission", "took", "drug"):     dim_in_feat_edge_admi_tool_drug,
+            ("drug", "rev_took", "admission"): dim_in_feat_edge_admi_tool_drug
+        }
+        self.num_decoder_layers = num_decoder_layers
         self.hidden_dim = hidden_dim
 
-        # DONE: Think about the first args of `nn.Embedding` here should equal to
+        # EMBD
+        # ~~Think about the first args of `nn.Embedding` here should equal to~~
         #  - max of total `HADM_ID`?
         #  - current batch_size of `HADM_ID`?
         #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
-        # self.admission_embedding = nn.Embedding(self.num_admissions, self.hidden_dim)
-        self.labitem_embedding = nn.Embedding(self.num_labitems, self.hidden_dim)
-        self.drug_embedding    = nn.Embedding(self.num_drugs, self.hidden_dim)
+        self.module_dict_embedding = nn.ModuleDict({
+            node_type: nn.Embedding(self.node_type_to_node_num[node_type], self.hidden_dim) \
+            for node_type in self.node_types if node_type != 'admission'
+        })
+
+        # PROJ
+        self.module_dict_node_feat_proj = nn.ModuleDict({
+            node_type: nn.Linear(in_features=self.node_type_to_dim_in_feat_node[node_type], out_features=self.hidden_dim) \
+            for node_type in self.node_types
+        })
+        self.module_dict_edge_feat_proj = nn.ModuleDict({
+            # TypeError: module name should be a string. Got tuple
+            "_".join(edge_type): nn.Linear(in_features=self.edge_type_to_dim_in_feat_edge[edge_type], out_features=self.hidden_dim) \
+            for edge_type in self.edge_types
+        })
 
         self.position_encoding = PositionalEncoding(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep)
 
-        # will use MLP as proj better?
-        self.proj_admission      = nn.Linear(in_features=8, out_features=self.hidden_dim)
-        self.proj_labitem        = nn.Linear(in_features=2, out_features=self.hidden_dim)
-        self.proj_drug           = nn.Linear(in_features=8, out_features=self.hidden_dim)
+        self.gnns = MultiGnns(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep,
+                              gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num,
+                              node_types=self.node_types, edge_types=self.edge_types)
 
-        self.proj_edge_attr      = nn.Linear(in_features=2, out_features=self.hidden_dim)
-        self.proj_edge_attr4drug = nn.Linear(in_features=7, out_features=self.hidden_dim)
+        # DECODER
+        self.module_dict_decoder = nn.ModuleDict({
+            node_type: nn.TransformerDecoder(
+                nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512),
+                num_layers=self.num_decoder_layers
+            ) for node_type in self.node_types
+        })
 
-        self.gnns = MultiGnns(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep, gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num)
-
-        self.decoder_layers_admission = nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512)
-        self.decoder_layers_labitem   = nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512)
-        self.decoder_layers_drug      = nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512)
-
-        self.decoder_admission = nn.TransformerDecoder(self.decoder_layers_admission, num_layers=self.num_decoder_layers_admission)
-        self.decoder_labitem   = nn.TransformerDecoder(self.decoder_layers_labitem,   num_layers=self.num_decoder_layers_labitem)
-        self.decoder_drug      = nn.TransformerDecoder(self.decoder_layers_drug,      num_layers=self.num_decoder_layers_drug)
-
-        self.links_predictor4item = LinksPredictor(hidden_dim=self.hidden_dim)
-        self.links_predictor4drug = LinksPredictor(hidden_dim=self.hidden_dim)
+        # LIKES_PREDICTOR
+        self.module_dict_links_predictor = nn.ModuleDict({
+            node_type: LinksPredictor(hidden_dim=self.hidden_dim) \
+            for node_type in self.node_types if node_type != "admission"
+        })
 
         self.reset_parameters()
 
@@ -161,7 +194,8 @@ class LERS(nn.Module):
         Params:
             - `neg_smp_stratege`: the stratege of negative sampling
                 - \in [1, 100], assume each patient is assigned with `neg_smp_stratege` negative edges
-                - 0 for 1: 2 (positive: negative)
+                - 0 for 1: 2 (positive: negative
+                - -1 for full-set
         """
         device = hg["admission", "did", "labitem"].timestep.device
 
@@ -264,47 +298,69 @@ class LERS(nn.Module):
     def forward(self, hg: HeteroData):
         hgs = [self.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy) for t in range(self.max_timestep)]
 
-        list_dict_node_feats = [{'admission': self.proj_admission(hg['admission'].x),
-                                 'labitem':   self.proj_labitem(hg['labitem'].x) + self.labitem_embedding(hg['labitem'].node_id),
-                                 'drug':      self.proj_drug(hg['drug'].x) +       self.drug_embedding(hg['drug'].node_id)}
-                                for hg in hgs]
-        list_edge_index_dict = [hg.edge_index_dict for hg in hgs]
-        list_dict_edge_attrs = [{('admission', 'did', 'labitem'):     self.proj_edge_attr(hg["admission", "did", "labitem"].x),
-                                 ('labitem', 'rev_did', 'admission'): self.proj_edge_attr(hg['labitem', 'rev_did', 'admission'].x),
-                                 ("admission", "took", "drug"):       self.proj_edge_attr4drug(hg["admission", "took", "drug"].x),
-                                 ("drug", "rev_took", "admission"):   self.proj_edge_attr4drug(hg["drug", "rev_took", "admission"].x)}
-                                for hg in hgs]
+        list_dict_node_feats = [{
+           node_type: self.module_dict_node_feat_proj[node_type](hg[node_type].x) + self.module_dict_embedding[node_type](hg[node_type].node_id) if node_type != 'admission' \
+                 else self.module_dict_node_feat_proj[node_type](hg[node_type].x) \
+            for node_type in self.node_types
+        } for hg in hgs]
+        list_edge_index_dict = [{
+            edge_type: edge_index \
+            for edge_type, edge_index in hg.edge_index_dict.items() if edge_type in self.edge_types
+        } for hg in hgs]
+        list_dict_edge_attrs = [{
+            edge_type: self.module_dict_edge_feat_proj["_".join(edge_type)](hg[edge_type].x)
+            for edge_type in self.edge_types
+        } for hg in hgs]
 
+        # go through gnns
         list_dict_node_feats = self.gnns(list_dict_node_feats, list_edge_index_dict, list_dict_edge_attrs)
 
-        admission_node_feats = torch.stack([dict_node_feats['admission'] for dict_node_feats in list_dict_node_feats])
-        labitem_node_feats   = torch.stack([dict_node_feats['labitem']   for dict_node_feats in list_dict_node_feats])
-        drug_node_feats      = torch.stack([dict_node_feats['drug']      for dict_node_feats in list_dict_node_feats])
-
-        # Add position encoding:
-        admission_node_feats = self.position_encoding(admission_node_feats)
-        labitem_node_feats   = self.position_encoding(labitem_node_feats)
-        drug_node_feats      = self.position_encoding(drug_node_feats)
-
-        device = admission_node_feats.device
-        tgt_mask = memory_mask = nn.Transformer.generate_square_subsequent_mask(self.max_timestep).to(device)
-
-        tgt_admi = mem_admi = admission_node_feats
-        tgt_labi = mem_labi = labitem_node_feats
-        tgt_drug = mem_drug = drug_node_feats
-
-        admission_node_feats = self.decoder_admission(tgt=tgt_admi, memory=mem_admi, tgt_mask=tgt_mask, memory_mask=memory_mask)
-        labitem_node_feats   = self.decoder_labitem(  tgt=tgt_labi, memory=mem_labi, tgt_mask=tgt_mask, memory_mask=memory_mask)
-        drug_node_feats      = self.decoder_drug(     tgt=tgt_drug, memory=mem_drug, tgt_mask=tgt_mask, memory_mask=memory_mask)
+        # decode
+        dict_node_feat = {
+            node_type: torch.stack([dict_node_feats[node_type] for dict_node_feats in list_dict_node_feats]) \
+            for node_type in self.node_types
+        }
+        for node_type, node_feat in dict_node_feat.items():
+            node_feat = self.position_encoding(node_feat)  # Add position encoding
+            tgt_mask = memory_mask = nn.Transformer.generate_square_subsequent_mask(self.max_timestep).to(node_feat.device)
+            node_feat = self.module_dict_decoder[node_type](tgt=node_feat, memory=node_feat, tgt_mask=tgt_mask, memory_mask=memory_mask)
+            dict_node_feat[node_type] = node_feat  # update
 
         # Link predicting:
-        list_labels4item = []; list_scores4item = []
-        list_labels4drug = []; list_scores4drug = []; list_edge_indices4drug = []
-        for curr_timestep, hg in enumerate(hgs):
-            list_labels4item.append(hg.lables4item)
-            list_labels4drug.append(hg.labels4drug)
-            list_scores4item.append(self.links_predictor4item(admission_node_feats[curr_timestep], labitem_node_feats[curr_timestep], hg.lables4item_index))
-            list_scores4drug.append(self.links_predictor4drug(admission_node_feats[curr_timestep], drug_node_feats[curr_timestep],    hg.labels4drug_index))
-            list_edge_indices4drug.append(hg.labels4drug_index)
+        dict_every_day_pred = {}
+        for node_type in self.node_types:
+            if node_type != "admission":  # admission is not the goal of prediction
+                if node_type == "drug":
+                    dict_every_day_pred[node_type] = {
+                        "scores": [self.module_dict_links_predictor[node_type](dict_node_feat["admission"][curr_timestep],
+                                                                               dict_node_feat["drug"][curr_timestep],
+                                                                               hg.labels4drug_index) \
+                                   for curr_timestep, hg in enumerate(hgs)],
+                        "labels":  [hg.labels4drug       for hg in hgs],
+                        "indices": [hg.labels4drug_index for hg in hgs]
+                    }
+                elif node_type == "labitem":
+                    dict_every_day_pred[node_type] = {
+                        "scores": [self.module_dict_links_predictor[node_type](dict_node_feat["admission"][curr_timestep],
+                                                                               dict_node_feat["labitem"][curr_timestep],
+                                                                               hg.lables4item_index) \
+                                   for curr_timestep, hg in enumerate(hgs)],
+                        "labels":  [hg.lables4item       for hg in hgs],
+                        "indices": [hg.lables4item_index for hg in hgs]
+                    }
+                else:
+                    raise f"check the edge_types! curr: {self.edge_types}"
 
-        return list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug
+        return dict_every_day_pred
+
+
+if __name__ == "__main__":
+    node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    model = LERS(max_timestep=20,
+                 gnn_type="GENConv",
+                 node_types=node_types,
+                 edge_types=edge_types,
+                 num_decoder_layers=6,
+                 hidden_dim=128,
+                 neg_smp_strategy=0)
+    print(model)
