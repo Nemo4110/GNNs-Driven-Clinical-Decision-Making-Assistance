@@ -35,7 +35,7 @@ class SingelGnn(nn.Module):
 
     def forward(self, node_feats, edge_index, edge_attrs):
         for conv in self.layers:
-            node_feats = conv.forward(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
+            node_feats = conv(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
         return node_feats
 
 
@@ -308,7 +308,3 @@ class LERS(nn.Module):
             list_edge_indices4drug.append(hg.labels4drug_index)
 
         return list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug
-
-
-if __name__ == "__main__":
-    pass
