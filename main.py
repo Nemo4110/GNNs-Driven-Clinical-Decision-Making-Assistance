@@ -12,6 +12,8 @@ from dataset.hgs import MyOwnDataset
 from model.lers import LERS
 from utils.metrics import Logger
 from utils.best_thresholds import BestThreshldLogger
+from utils.misc import calc_loss, node_type_to_prefix
+from utils.config import HeteroGraphConfig
 
 
 if __name__ == '__main__':
@@ -22,16 +24,13 @@ if __name__ == '__main__':
     parser.add_argument("--max_timestep", type=int,                 default=20,         help="The maximum `TIMESTEP`")
     # NOTE: when max_timestep set to 30 or 50,
     #       would trigger the assert error "last timestep has not labels!"
-    #       in `get_subgraph_by_timestep` in lers.py
+    #       in `get_subgraph_by_timestep` in lers.py (bigger max_timestep can be support in future)
     parser.add_argument("--gnn_type",                                 default="GENConv", help="Specify the `conv` that being used as MessagePassing")
-    parser.add_argument("--num_decoder_layers_admission", type=int,   default=6,         help="Number of decoder layers for admission")
-    parser.add_argument("--num_decoder_layers_labitem",   type=int,   default=6,         help="Number of decoder layers for labitem")
-    parser.add_argument("--num_decoder_layers_drug",      type=int,   default=6,         help="Number of decoder layers for drug")
+    parser.add_argument("--num_decoder_layers",           type=int,   default=6,         help="Number of decoder layers")
     parser.add_argument("--hidden_dim",                   type=int,   default=128,       help="hidden dimension")
     parser.add_argument("--lr",                           type=float, default=0.0003,    help="learning rate")
 
     # Paths
-    # parser.add_argument("--root_path_dataset",  default=r"../datasets/mimic-iii-hgs-new", help="path where dataset directory locates")  # in linux
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
     parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                     help="path where models save")
     parser.add_argument("--path_dir_results",   default=r"./results",                       help="path where results save")
@@ -59,18 +58,23 @@ if __name__ == '__main__':
 
     device = d2l.try_gpu(args.num_gpu) if args.use_gpu else torch.device('cpu')
 
+    # Heterogeneous graph config
+    node_types, edge_types = HeteroGraphConfig.use_all_edge_type() if args.task=="MIX" else HeteroGraphConfig.use_one_edge_type(item_type=args.task)
+
     # model
     model = LERS(max_timestep=args.max_timestep,
                  gnn_type=args.gnn_type,
-                 num_decoder_layers_admission=args.num_decoder_layers_admission,
-                 num_decoder_layers_labitem=args.num_decoder_layers_labitem,
-                 num_decoder_layers_drug=args.num_decoder_layers_drug,
+                 node_types=node_types,
+                 edge_types=edge_types,
+                 num_decoder_layers=args.num_decoder_layers,
                  hidden_dim=args.hidden_dim,
                  neg_smp_strategy=args.neg_smp_strategy).to(device)
 
     if args.train:
-        logger4item_best_thresholds = BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
-        logger4drug_best_thresholds = BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
+        best_threshold_loggers = {
+            node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
+            for node_type in node_types if node_type != 'admission'
+        }
 
         train_set = MyOwnDataset(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -83,25 +87,18 @@ if __name__ == '__main__':
             for hg in t_loop_train_set:
                 optimizer.zero_grad()
                 hg = hg.to(device)
-                list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, _ = model(hg)
-
-                if epoch == (args.epochs - 1):
-                    logger4item_best_thresholds.log(list_scores4item, list_labels4item)
-                    logger4drug_best_thresholds.log(list_scores4drug, list_labels4drug)
-
-                # calculating loss
-                loss4item = torch.tensor(0.0).to(device)
-                for scores4item, labels4item in zip(list_scores4item, list_labels4item):
-                    loss4item += F.binary_cross_entropy_with_logits(scores4item, labels4item)
-                loss4drug = torch.tensor(0.0).to(device)
-                for scores4drug, labels4drug in zip(list_scores4drug, list_labels4drug):
-                    loss4drug += F.binary_cross_entropy_with_logits(scores4drug, labels4drug)
-                loss = loss4item + loss4drug  # with different weight
+                dict_every_day_pred = model(hg)
+                loss = calc_loss(dict_every_day_pred, node_types, device)  # calculating loss
                 loss.backward()
-
-                # optimizing
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
-                optimizer.step()
+                optimizer.step()  # optimizing
+
+                # log the best_threshold
+                if epoch == (args.epochs - 1):
+                    for node_type, best_threshold_logger in best_threshold_loggers.items():
+                        best_threshold_logger.log(dict_every_day_pred[node_type]["scores"],
+                                                  dict_every_day_pred[node_type]["labels"])
+                        best_threshold_logger.save(prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
 
                 t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss:.4f} \033[0m')
 
@@ -109,14 +106,8 @@ if __name__ == '__main__':
         model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, f"{model_saving_prefix}_loss={loss:.4f}.pt"))
 
-        logger4item_best_thresholds.save(prefix=f"4ITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
-        logger4drug_best_thresholds.save(prefix=f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
-
     # testing
     if args.test:
-        str_prefix4item = f"4ITEMS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-        str_prefix4drug = f"4DRUGS_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
-
         test_set = MyOwnDataset(root_path=root_path, usage="test")
 
         if not args.train:
@@ -124,16 +115,25 @@ if __name__ == '__main__':
             model.load_state_dict(model_state_dict)
 
         # metrics loggers
-        logger4item = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, best_thresholdspath=os.path.join(args.path_dir_thresholds, f"{str_prefix4item}_best_thresholds.pickle"))
-        logger4drug = Logger(max_timestep=args.max_timestep, save_dir_path=resl_path, best_thresholdspath=os.path.join(args.path_dir_thresholds, f"{str_prefix4drug}_best_thresholds.pickle"), is_calc_ddi=True)
+        metrics_loggers = {}
+        for node_type in node_types:
+            if node_type == 'admission':
+                continue
+            metrics_loggers[node_type] = Logger(max_timestep=args.max_timestep,
+                                                save_dir_path=resl_path,
+                                                best_thresholdspath=os.path.join(args.path_dir_thresholds, f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}_best_thresholds.pickle"),
+                                                is_calc_ddi=True if node_type == 'drug' else False)
 
         model.eval()
         with torch.no_grad():
             for hg in tqdm(test_set):
                 hg = hg.to(device)
-                list_scores4item, list_labels4item, list_scores4drug, list_labels4drug, list_edge_indices4drug = model(hg)
-                logger4item.log(list_scores4item, list_labels4item)
-                logger4drug.log(list_scores4drug, list_labels4drug, list_edge_indices4drug)
+                dict_every_day_pred = model(hg)
 
-        logger4item.save(description=str_prefix4item)
-        logger4drug.save(description=str_prefix4drug)
+                for node_type, metrics_logger in metrics_loggers.items():
+                    metrics_logger.log(dict_every_day_pred[node_type]["scores"],
+                                       dict_every_day_pred[node_type]["labels"],
+                                       dict_every_day_pred[node_type]["indices"] if node_type == 'drug' else None)
+
+        for node_type, metrics_logger in metrics_loggers.items():
+            metrics_logger.save(description=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
