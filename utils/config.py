@@ -1,3 +1,25 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class MappingManager:
+    node_type_to_node_num = {
+        "labitem": 753,
+        "drug": 4294
+    }
+    node_type_to_node_feat_dim_in = {
+        "admission": 8,
+        "labitem": 2,
+        "drug": 8
+    }
+    edge_type_to_edge_feat_dim_in = {
+        ('admission', 'did', 'labitem'): 2,
+        ('labitem', 'rev_did', 'admission'): 2,
+        ("admission", "took", "drug"): 7,
+        ("drug", "rev_took", "admission"): 7
+    }
+
+
 class HeteroGraphConfig:
     @staticmethod
     def use_all_edge_type():
@@ -22,3 +44,7 @@ class HeteroGraphConfig:
             raise NotImplementedError
 
         return node_types, edge_types
+
+
+if __name__ == "__main__":
+    print(MappingManager.node_type_to_node_feat_dim_in['admission'])

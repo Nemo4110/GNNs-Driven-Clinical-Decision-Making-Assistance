@@ -9,11 +9,11 @@ from torch_geometric.data import HeteroData
 from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
 from torch_geometric.nn import to_hetero
 from torch_geometric.utils import negative_sampling
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 
 from dataset.hgs import MyOwnDataset
 from model.position_encoding import PositionalEncoding
-from utils.config import HeteroGraphConfig
+from utils.config import HeteroGraphConfig, MappingManager
 
 
 class SingelGnn(nn.Module):
@@ -47,7 +47,7 @@ class MultiGnns(nn.Module):
                  max_timestep: int,
                  gnn_type: str,
                  node_types: List[str],
-                 edge_types: List[Tuple[str]],
+                 edge_types: List[Tuple[str, str, str]],
                  gnn_layer_num: int = 2,
                  ):
         super().__init__()
@@ -98,16 +98,7 @@ class LERS(nn.Module):
                  neg_smp_strategy: int,
 
                  node_types: List[str],
-                 edge_types: List[Tuple[str]],
-
-                 num_labitems: int = 753,
-                 num_drugs: int = 4294,
-
-                 dim_in_feat_node_admission: int = 8,
-                 dim_in_feat_node_labitem: int = 2,
-                 dim_in_feat_node_drug: int = 8,
-                 dim_in_feat_edge_admi_did_labitem: int = 2,
-                 dim_in_feat_edge_admi_tool_drug: int = 7,
+                 edge_types: List[Tuple[str, str, str]],
 
                  num_decoder_layers=6,
                  hidden_dim: int = 128,
@@ -122,21 +113,6 @@ class LERS(nn.Module):
         self.node_types = node_types
         self.edge_types = edge_types
 
-        self.node_type_to_node_num = {
-            "labitem": num_labitems,
-            "drug":    num_drugs
-        }
-        self.node_type_to_dim_in_feat_node = {
-            "admission": dim_in_feat_node_admission,
-            "labitem":   dim_in_feat_node_labitem,
-            "drug":      dim_in_feat_node_drug
-        }
-        self.edge_type_to_dim_in_feat_edge = {
-            ('admission', 'did', 'labitem'):     dim_in_feat_edge_admi_did_labitem,
-            ('labitem', 'rev_did', 'admission'): dim_in_feat_edge_admi_did_labitem,
-            ("admission", "took", "drug"):     dim_in_feat_edge_admi_tool_drug,
-            ("drug", "rev_took", "admission"): dim_in_feat_edge_admi_tool_drug
-        }
         self.num_decoder_layers = num_decoder_layers
         self.hidden_dim = hidden_dim
 
@@ -146,18 +122,18 @@ class LERS(nn.Module):
         #  - current batch_size of `HADM_ID`?
         #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
         self.module_dict_embedding = nn.ModuleDict({
-            node_type: nn.Embedding(self.node_type_to_node_num[node_type], self.hidden_dim) \
+            node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type], self.hidden_dim) \
             for node_type in self.node_types if node_type != 'admission'
         })
 
         # PROJ
         self.module_dict_node_feat_proj = nn.ModuleDict({
-            node_type: nn.Linear(in_features=self.node_type_to_dim_in_feat_node[node_type], out_features=self.hidden_dim) \
+            node_type: nn.Linear(in_features=MappingManager.node_type_to_node_feat_dim_in[node_type], out_features=self.hidden_dim) \
             for node_type in self.node_types
         })
         self.module_dict_edge_feat_proj = nn.ModuleDict({
             # TypeError: module name should be a string. Got tuple
-            "_".join(edge_type): nn.Linear(in_features=self.edge_type_to_dim_in_feat_edge[edge_type], out_features=self.hidden_dim) \
+            "_".join(edge_type): nn.Linear(in_features=MappingManager.edge_type_to_edge_feat_dim_in[edge_type], out_features=self.hidden_dim) \
             for edge_type in self.edge_types
         })
 
