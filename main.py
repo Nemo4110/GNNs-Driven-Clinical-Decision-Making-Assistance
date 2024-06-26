@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_argument("--path_dir_thresholds",default=r"./thresholds",                    help="path where thresholds save")
 
     # Experiment settings
-    parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task")
+    parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task, in ['MIX', 'drug', 'labitem']")
     parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False,     help="specify whether do training")
     parser.add_argument("--test",             action="store_true",  default=False,     help="specify whether do testing")
