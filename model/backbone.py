@@ -41,7 +41,7 @@ class MultiGnns(nn.Module):
         return list_dict_node_feats
 
 
-class LERS(nn.Module):
+class BackBone(nn.Module):
     def __init__(self,
                  max_timestep: int,
                  gnn_type: str,
@@ -175,11 +175,14 @@ class LERS(nn.Module):
 
 if __name__ == "__main__":
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
-    model = LERS(max_timestep=20,
-                 gnn_type="GENConv",
-                 node_types=node_types,
-                 edge_types=edge_types,
-                 num_decoder_layers=6,
-                 hidden_dim=128,
-                 neg_smp_strategy=0)
+    model = BackBone(
+        max_timestep=20,
+        gnn_type="GENConv",
+        node_types=node_types,
+        edge_types=edge_types,
+        num_decoder_layers=6,
+        hidden_dim=128,
+        neg_smp_strategy=0
+    )
+    model = torch.compile(model)
     print(model)

@@ -19,7 +19,7 @@ In the CMD:
 1. Create conda environment:
 
     ```shell
-    conda create --name <env_name> python==3.9.0
+    conda create --name <env_name> python==3.10.12
     conda activate <env_name>
     ```
 
@@ -28,14 +28,13 @@ In the CMD:
     ```shell
     # NOTE: following line shoule be adjusted according to your CUDA version
     # see <https://pytorch.org/get-started/previous-versions/> for detail
-    conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3
+    # conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3  # for our old 2xRTX3090 server which CUDA<11.3
+   
+    # RECOMMEND: use pytorch > 2.0 for compile feature that accelerates training speed
+    conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 
-    conda install pyg -c pyg
-
-    pip install d2l
-    pip install tqdm
-    pip install scikit-learn
-    pip install dill
+    pip install torch_geometric
+    pip install d2l tqdm scikit-learn dill
     ```
 
 # Usage

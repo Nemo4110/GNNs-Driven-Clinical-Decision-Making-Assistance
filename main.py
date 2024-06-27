@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import torch.nn as nn
 
 import utils.constant as constant
 
@@ -8,7 +9,7 @@ from tqdm import tqdm
 from d2l import torch as d2l
 
 from dataset.hgs import DiscreteTimeHeteroGraph
-from model.lers import LERS
+from model.backbone import BackBone
 from utils.metrics import Logger
 from utils.best_thresholds import BestThreshldLogger
 from utils.misc import calc_loss, node_type_to_prefix
@@ -23,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument("--max_timestep", type=int,                 default=20,         help="The maximum `TIMESTEP`")
     # NOTE: when max_timestep set to 30 or 50,
     #       would trigger the assert error "last timestep has not labels!"
-    #       in `get_subgraph_by_timestep` in lers.py (bigger max_timestep can be support in future)
+    #       in `get_subgraph_by_timestep` (bigger max_timestep can be support in future)
     parser.add_argument("--gnn_type",                                 default="GENConv", help="Specify the `conv` that being used as MessagePassing")
     parser.add_argument("--gnn_layer_num",                type=int,   default=2,         help="Number of gnn layers")
     parser.add_argument("--num_decoder_layers",           type=int,   default=6,         help="Number of decoder layers")
@@ -62,14 +63,17 @@ if __name__ == '__main__':
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type() if args.task=="MIX" else HeteroGraphConfig.use_one_edge_type(item_type=args.task)
 
     # model
-    model = LERS(max_timestep=args.max_timestep,
-                 gnn_type=args.gnn_type,
-                 gnn_layer_num=args.gnn_layer_num,
-                 node_types=node_types,
-                 edge_types=edge_types,
-                 num_decoder_layers=args.num_decoder_layers,
-                 hidden_dim=args.hidden_dim,
-                 neg_smp_strategy=args.neg_smp_strategy).to(device)
+    model: nn.Module = BackBone(
+        max_timestep=args.max_timestep,
+        gnn_type=args.gnn_type,
+        gnn_layer_num=args.gnn_layer_num,
+        node_types=node_types,
+        edge_types=edge_types,
+        num_decoder_layers=args.num_decoder_layers,
+        hidden_dim=args.hidden_dim,
+        neg_smp_strategy=args.neg_smp_strategy
+    ).to(device)
+    model = torch.compile(model)
 
     if args.train:
         best_threshold_loggers = {
