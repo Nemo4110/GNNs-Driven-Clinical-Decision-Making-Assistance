@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch_geometric.transforms as T
 import torch.nn.functional as F
-import numpy as np
 
 from torch_geometric.data import HeteroData
 from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
@@ -11,9 +10,9 @@ from torch_geometric.nn import to_hetero
 from torch_geometric.utils import negative_sampling
 from typing import List, Tuple
 
-from dataset.hgs import MyOwnDataset
-from model.position_encoding import PositionalEncoding
+from dataset.hgs import DiscreteTimeHeteroGraph
 from utils.config import HeteroGraphConfig, MappingManager
+from model.layers import LinksPredictor, PositionalEncoding
 
 
 class SingelGnn(nn.Module):
@@ -56,10 +55,6 @@ class MultiGnns(nn.Module):
         # Solution: use the `nn.ModuleList` instead of list
         self.gnns = nn.ModuleList([SingelGnn(hidden_dim=hidden_dim, gnn_type=gnn_type, gnn_layer_num=gnn_layer_num)
                                    for _ in range(max_timestep)])  # as many fc as max_timestep
-
-        # node_types = ['admission', 'labitem', 'drug']
-        # edge_types = [('admission', 'did', 'labitem'), ('labitem', 'rev_did', 'admission'),
-        #               ("admission", "took", "drug"), ("drug", "rev_took", "admission")]
 
         # !!! Warning: here must use `self.gnns[i]`, if we use `gnn` will cause failure of `to_hetero`,
         #              because the `gnn` are temp parameter!
@@ -325,7 +320,7 @@ class LERS(nn.Module):
                         "indices": [hg.lables4item_index for hg in hgs]
                     }
                 else:
-                    raise f"check the edge_types! curr: {self.edge_types}"
+                    raise f"check the node_types config! curr: {self.node_types}"
 
         return dict_every_day_pred
 

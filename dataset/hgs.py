@@ -5,7 +5,7 @@ from torch_geometric.data import Dataset
 from tqdm import tqdm
 
 
-class MyOwnDataset(Dataset):
+class DiscreteTimeHeteroGraph(Dataset):
     def __init__(self, root_path: str, usage: str):
         super().__init__()
 
@@ -23,6 +23,6 @@ class MyOwnDataset(Dataset):
 
 
 if __name__ == "__main__":
-    train_set = MyOwnDataset(root_path=r"D:\Datasets\mimic\mimic-iii-hgs-new\batch_size_128", usage="val")
+    train_set = DiscreteTimeHeteroGraph(root_path=r"D:\Datasets\mimic\mimic-iii-hgs-new\batch_size_128", usage="val")
     for hg in tqdm(train_set):
         assert max(hg["admission"].node_id) >= max(hg["admission", "did", "labitem"].edge_index[0])

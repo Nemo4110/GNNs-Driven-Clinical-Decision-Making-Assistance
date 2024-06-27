@@ -1,14 +1,13 @@
 import argparse
 import os
 import torch
-import torch.nn.functional as F
 
 import utils.constant as constant
 
 from tqdm import tqdm
 from d2l import torch as d2l
 
-from dataset.hgs import MyOwnDataset
+from dataset.hgs import DiscreteTimeHeteroGraph
 from model.lers import LERS
 from utils.metrics import Logger
 from utils.best_thresholds import BestThreshldLogger
@@ -78,7 +77,7 @@ if __name__ == '__main__':
             for node_type in node_types if node_type != 'admission'
         }
 
-        train_set = MyOwnDataset(root_path=root_path, usage="train")
+        train_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
         # train
@@ -110,7 +109,7 @@ if __name__ == '__main__':
 
     # testing
     if args.test:
-        test_set = MyOwnDataset(root_path=root_path, usage="test")
+        test_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="test")
 
         if not args.train:
             model_state_dict = torch.load(os.path.join(args.path_dir_model_hub, f"{args.test_model_state_dict}.pt"), map_location=device)
