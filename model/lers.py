@@ -1,41 +1,14 @@
 import sys; sys.path.append('..')
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from torch_geometric.data import HeteroData
-from torch_geometric.nn.conv import GINEConv, GENConv, GATConv
 from torch_geometric.nn import to_hetero
 from typing import List, Tuple
 
 from dataset.hgs import DiscreteTimeHeteroGraph
 from utils.config import HeteroGraphConfig, MappingManager
-from model.layers import LinksPredictor, PositionalEncoding
-
-
-class SingelGnn(nn.Module):
-    r"""Chosen from this cheatsheet: <https://pytorch-geometric.readthedocs.io/en/latest/notes/cheatsheet.html>"""
-    def __init__(self, hidden_dim, gnn_type, gnn_layer_num: int = 2):
-        super().__init__()
-        assert gnn_layer_num > 0
-        self.hidden_dim = hidden_dim
-
-        if gnn_type == "GINEConv":
-            self.layers = nn.ModuleList([GINEConv(nn=nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim))
-                                         for _ in range(gnn_layer_num)])
-        elif gnn_type == "GENConv":
-            self.layers = nn.ModuleList([GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
-                                         for _ in range(gnn_layer_num)])
-        elif gnn_type == "GATConv":
-            self.layers = nn.ModuleList([GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
-                                         for _ in range(gnn_layer_num)])
-        else:
-            raise f"Do not support arg:gnn_type={gnn_type} now!"
-
-    def forward(self, node_feats, edge_index, edge_attrs):
-        for conv in self.layers:
-            node_feats = conv(x=node_feats, edge_index=edge_index, edge_attr=edge_attrs).relu()
-        return node_feats
+from model.layers import LinksPredictor, PositionalEncoding, SingelGnn
 
 
 class MultiGnns(nn.Module):
@@ -66,22 +39,6 @@ class MultiGnns(nn.Module):
                                                    list_dict_edge_attrs[i])
 
         return list_dict_node_feats
-
-
-class LinksPredictor(nn.Module):
-    def __init__(self, hidden_dim=128):
-        super().__init__()
-        self.re_weight_a = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-        self.re_weight_b = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-
-    def forward(self, node_features_a, node_features_b, edge_label_index):
-        node_features_a_selected = node_features_a[edge_label_index[0]]
-        node_features_b_selected = node_features_b[edge_label_index[1]]
-
-        node_features_a_selected = self.re_weight_a(node_features_a_selected)
-        node_features_b_selected = self.re_weight_b(node_features_b_selected)
-
-        return (node_features_a_selected * node_features_b_selected).sum(dim=-1)
 
 
 class LERS(nn.Module):
@@ -158,7 +115,7 @@ class LERS(nn.Module):
                 nn.init.xavier_normal_(weight)
 
     def forward(self, hg: HeteroData):
-        hgs = [MyOwnDataset.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy) for t in range(self.max_timestep)]
+        hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy) for t in range(self.max_timestep)]
 
         list_dict_node_feats = [{
            node_type: self.module_dict_node_feat_proj[node_type](hg[node_type].x) + self.module_dict_embedding[node_type](hg[node_type].node_id) if node_type != 'admission' \
