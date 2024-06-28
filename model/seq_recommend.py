@@ -85,27 +85,28 @@ class SeqRecommend(nn.Module):
         # Link predicting:
         dict_every_day_pred = {}
         for node_type in self.node_types:
-            if node_type != "admission":  # admission is not the goal of prediction
-                if node_type == "drug":
-                    dict_every_day_pred[node_type] = {
-                        "scores": [self.predictor[node_type](dict_node_feat["admission"][curr_timestep],
-                                                             dict_node_feat["drug"][curr_timestep],
-                                                             hg.labels4drug_index) \
-                                   for curr_timestep, hg in enumerate(hgs)],
-                        "labels":  [hg.labels4drug       for hg in hgs],
-                        "indices": [hg.labels4drug_index for hg in hgs]
-                    }
-                elif node_type == "labitem":
-                    dict_every_day_pred[node_type] = {
-                        "scores": [self.predictor[node_type](dict_node_feat["admission"][curr_timestep],
-                                                             dict_node_feat["labitem"][curr_timestep],
-                                                             hg.lables4item_index) \
-                                   for curr_timestep, hg in enumerate(hgs)],
-                        "labels":  [hg.lables4item       for hg in hgs],
-                        "indices": [hg.lables4item_index for hg in hgs]
-                    }
-                else:
-                    raise f"check the node_types config! curr: {self.node_types}"
+            if node_type == "admission":  # admission is not the goal of prediction
+                continue
+            elif node_type == "drug":
+                dict_every_day_pred[node_type] = {
+                    "scores": [self.predictor[node_type](dict_node_feat["admission"][curr_timestep],
+                                                         dict_node_feat["drug"][curr_timestep],
+                                                         hg.labels4drug_index) \
+                               for curr_timestep, hg in enumerate(hgs)],
+                    "labels":  [hg.labels4drug       for hg in hgs],
+                    "indices": [hg.labels4drug_index for hg in hgs]
+                }
+            elif node_type == "labitem":
+                dict_every_day_pred[node_type] = {
+                    "scores": [self.predictor[node_type](dict_node_feat["admission"][curr_timestep],
+                                                         dict_node_feat["labitem"][curr_timestep],
+                                                         hg.lables4item_index) \
+                               for curr_timestep, hg in enumerate(hgs)],
+                    "labels":  [hg.lables4item       for hg in hgs],
+                    "indices": [hg.lables4item_index for hg in hgs]
+                }
+            else:
+                raise f"check the node_types config! curr: {self.node_types}"
 
         return dict_every_day_pred
 
