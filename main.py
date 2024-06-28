@@ -103,9 +103,12 @@ if __name__ == '__main__':
                     for node_type, best_threshold_logger in best_threshold_loggers.items():
                         best_threshold_logger.log(dict_every_day_pred[node_type]["scores"],
                                                   dict_every_day_pred[node_type]["labels"])
-                        best_threshold_logger.save(prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
 
-                t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss:.4f} \033[0m')
+                t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss.item():.4f} \033[0m')
+
+        # save the best_threshold
+        for node_type, best_threshold_logger in best_threshold_loggers.items():
+            best_threshold_logger.save(prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
 
         # save trained model
         model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
