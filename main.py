@@ -5,12 +5,7 @@ import torch.nn as nn
 
 import utils.constant as constant
 
-from IPython import get_ipython
-# Check if running in Colab environment
-if 'google.colab' in str(get_ipython()):
-    from tqdm.notebook import tqdm
-else:
-    from tqdm import tqdm
+from tqdm import tqdm
 from d2l import torch as d2l
 
 from dataset.hgs import DiscreteTimeHeteroGraph
@@ -94,10 +89,11 @@ if __name__ == '__main__':
             model.train()
             t_loop_train_set = tqdm(train_set, leave=False)
             for hg in t_loop_train_set:
-                optimizer.zero_grad()
                 hg = hg.to(device)
                 dict_every_day_pred = model(hg)
                 loss = calc_loss(dict_every_day_pred, node_types, device)  # calculating loss
+
+                optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
                 optimizer.step()  # optimizing
