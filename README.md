@@ -29,11 +29,13 @@ In the CMD:
     # NOTE: following line shoule be adjusted according to your CUDA version
     # see <https://pytorch.org/get-started/previous-versions/> for detail
     # conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3  # for our old 2xRTX3090 server which CUDA<11.3
+    pip install -q torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113
+    # ⚠ use pytorch > 2.0 for compile feature that accelerates training speed, 
+    # ⚠ will cause gpu training loss nan problem for unknown reasons
+    # conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
    
-    # RECOMMEND: use pytorch > 2.0 for compile feature that accelerates training speed
-    conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-
-    pip install torch_geometric
+    pip install torch_geometric -f https://data.pyg.org/whl/torch-1.12.1+cu113.html
+    # pip install torch_geometric
     pip install d2l tqdm scikit-learn dill
     ```
 

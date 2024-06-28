@@ -5,7 +5,12 @@ import torch.nn as nn
 
 import utils.constant as constant
 
-from tqdm import tqdm
+from IPython import get_ipython
+# Check if running in Colab environment
+if 'google.colab' in str(get_ipython()):
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 from d2l import torch as d2l
 
 from dataset.hgs import DiscreteTimeHeteroGraph
@@ -73,7 +78,6 @@ if __name__ == '__main__':
         hidden_dim=args.hidden_dim,
         neg_smp_strategy=args.neg_smp_strategy
     ).to(device)
-    model = torch.compile(model)
 
     if args.train:
         best_threshold_loggers = {

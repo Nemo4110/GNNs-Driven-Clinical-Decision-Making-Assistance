@@ -184,5 +184,4 @@ if __name__ == "__main__":
         hidden_dim=128,
         neg_smp_strategy=0
     )
-    model = torch.compile(model)
     print(model)

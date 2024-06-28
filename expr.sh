@@ -7,27 +7,27 @@
 # python main.py --use_gpu --train --batch_size_by_HADMID=128
 
 ### different gnn_type ###
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GINEConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GATConv
+#python main.py --use_gpu --train --gnn_type=GINEConv
+#python main.py --use_gpu --train --gnn_type=GENConv
+#python main.py --use_gpu --train --gnn_type=GATConv
 
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GINEConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GATConv
+#python main.py --use_gpu --train --gnn_type=GINEConv
+#python main.py --use_gpu --train --gnn_type=GENConv
+#python main.py --use_gpu --train --gnn_type=GATConv
 
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GINEConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GATConv
+#python main.py --use_gpu --train --gnn_type=GINEConv
+#python main.py --use_gpu --train --gnn_type=GENConv
+#python main.py --use_gpu --train --gnn_type=GATConv
 
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GINEConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GATConv
+#python main.py --use_gpu --train --gnn_type=GINEConv
+#python main.py --use_gpu --train --gnn_type=GENConv
+#python main.py --use_gpu --train --gnn_type=GATConv
 
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GINEConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv
-#python main.py --use_gpu --num_gpu=1 --train --gnn_type=GATConv
+#python main.py --use_gpu --train --gnn_type=GINEConv
+#python main.py --use_gpu --train --gnn_type=GENConv
+#python main.py --use_gpu --train --gnn_type=GATConv
 
-# python main.py --use_gpu --num_gpu=1 --train --gnn_type=GENConv --batch_size_by_HADMID=256
+# python main.py --use_gpu --train --gnn_type=GENConv --batch_size_by_HADMID=256
 
 ### testing ###
 python main.py --use_gpu --test --test_num=1 --gnn_type=GINEConv --neg_smp_strategy=100 --test_model_state_dict="task=MIX_gnn_type=GINEConv_batch_size_by_HADMID=128_loss=5.7964"
