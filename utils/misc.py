@@ -9,10 +9,9 @@ def calc_loss(dict_every_day_pred, node_types: List[str], device):
     for node_type in node_types:
         if node_type == "admission":
             continue
-        loss += F.binary_cross_entropy_with_logits(
-            input =torch.stack(dict_every_day_pred[node_type]["scores"]),
-            target=torch.stack(dict_every_day_pred[node_type]["labels"])
-        )
+        for scores, labels in zip(dict_every_day_pred[node_type]["scores"],
+                                  dict_every_day_pred[node_type]["labels"]):
+            loss += F.binary_cross_entropy_with_logits(scores, labels)
     return loss
 
 
