@@ -88,11 +88,11 @@ def get_decoder_by_choice(choice: str, hidden_dim: int, num_layers: int = 1):
             num_layers=num_layers
         )
     elif choice == "RNN":
-        chosen_decoder = nn.RNN(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=num_layers)
+        chosen_decoder = nn.RNN(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
     elif choice == "GRU":
-        chosen_decoder = nn.GRU(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=num_layers)
+        chosen_decoder = nn.GRU(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
     elif choice == "LSTM":
-        chosen_decoder = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=num_layers)
+        chosen_decoder = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
     else:
         raise NotImplementedError
 
@@ -102,8 +102,9 @@ def get_decoder_by_choice(choice: str, hidden_dim: int, num_layers: int = 1):
 def decode(decoder: nn.Module, input_seq: torch.tensor):
     """
     Args:
-        decoder
-        input_seq: has shape (seq_len, n_samples, n_features)
+        decoder:
+        input_seq:
+            has shape (seq_len, n_samples, n_features)
     """
     if isinstance(decoder, nn.TransformerDecoder):
         tgt_mask = memory_mask = nn.Transformer\
@@ -111,11 +112,13 @@ def decode(decoder: nn.Module, input_seq: torch.tensor):
             .to(input_seq.device)
         output_seq = decoder(tgt=input_seq, memory=input_seq, tgt_mask=tgt_mask, memory_mask=memory_mask)
     elif isinstance(decoder, nn.RNN):
-        output_seq = decoder(input=input_seq, h_0=input_seq[0])
+        # TypeError: RNN.forward() got an unexpected keyword argument 'h_0'
+        output_seq, h_n = decoder(input=input_seq, hx=input_seq[0].unsqueeze(0))
     elif isinstance(decoder, nn.GRU):
-        output_seq = decoder(input=input_seq, h_0=input_seq[0])
+        output_seq, h_n = decoder(input=input_seq, hx=input_seq[0].unsqueeze(0))
     elif isinstance(decoder, nn.LSTM):
-        output_seq = decoder(input=input_seq, h_0=input_seq[0], c_0=input_seq[0])
+        h_0, c_0 = input_seq[0].unsqueeze(0), input_seq[0].unsqueeze(0)
+        output_seq, h_n = decoder(input=input_seq, hx=(h_0, c_0))
     else:
         raise NotImplementedError
 

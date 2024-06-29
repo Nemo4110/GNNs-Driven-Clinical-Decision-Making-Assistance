@@ -8,7 +8,7 @@ from typing import List, Tuple
 
 from dataset.hgs import DiscreteTimeHeteroGraph
 from utils.config import HeteroGraphConfig, MappingManager
-from model.layers import LinksPredictor, PositionalEncoding, SingelGnn
+from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode
 
 
 class MultiGnns(nn.Module):
@@ -50,6 +50,7 @@ class BackBone(nn.Module):
                  node_types: List[str],
                  edge_types: List[Tuple[str, str, str]],
 
+                 decoder_choice: str = "TransformerDecoder",
                  num_decoder_layers=6,
                  hidden_dim: int = 128,
                  gnn_layer_num: int = 2):
@@ -63,6 +64,7 @@ class BackBone(nn.Module):
         self.node_types = node_types
         self.edge_types = edge_types
 
+        self.decoder_choice = decoder_choice
         self.num_decoder_layers = num_decoder_layers
         self.hidden_dim = hidden_dim
 
@@ -95,10 +97,8 @@ class BackBone(nn.Module):
 
         # DECODER
         self.module_dict_decoder = nn.ModuleDict({
-            node_type: nn.TransformerDecoder(
-                nn.TransformerDecoderLayer(d_model=self.hidden_dim, nhead=8, dim_feedforward=512),
-                num_layers=self.num_decoder_layers
-            ) for node_type in self.node_types
+            node_type: get_decoder_by_choice(choice=self.decoder_choice, hidden_dim=self.hidden_dim, num_layers=self.num_decoder_layers)
+            for node_type in self.node_types
         })
 
         # LIKES_PREDICTOR
@@ -141,9 +141,7 @@ class BackBone(nn.Module):
         }
         for node_type, node_feat in dict_node_feat.items():
             node_feat = self.position_encoding(node_feat)  # Add position encoding
-            tgt_mask = memory_mask = nn.Transformer.generate_square_subsequent_mask(self.max_timestep).to(node_feat.device)
-            node_feat = self.module_dict_decoder[node_type](tgt=node_feat, memory=node_feat, tgt_mask=tgt_mask, memory_mask=memory_mask)
-            dict_node_feat[node_type] = node_feat  # update
+            dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat)  # update
 
         # Link predicting:
         dict_every_day_pred = {}
