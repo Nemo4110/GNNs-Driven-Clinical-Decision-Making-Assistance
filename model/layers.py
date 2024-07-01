@@ -99,12 +99,14 @@ def get_decoder_by_choice(choice: str, hidden_dim: int, num_layers: int = 1):
     return chosen_decoder
 
 
-def decode(decoder: nn.Module, input_seq: torch.tensor):
+def decode(decoder: nn.Module, input_seq: torch.tensor, h_0: torch.tensor):
     """
     Args:
         decoder:
         input_seq:
             has shape (seq_len, n_samples, n_features)
+        h_0: for RNN-like modules
+            has shape (1, n_samples, n_features)
     """
     if isinstance(decoder, nn.TransformerDecoder):
         tgt_mask = memory_mask = nn.Transformer\
@@ -113,11 +115,11 @@ def decode(decoder: nn.Module, input_seq: torch.tensor):
         output_seq = decoder(tgt=input_seq, memory=input_seq, tgt_mask=tgt_mask, memory_mask=memory_mask)
     elif isinstance(decoder, nn.RNN):
         # TypeError: RNN.forward() got an unexpected keyword argument 'h_0'
-        output_seq, h_n = decoder(input=input_seq, hx=input_seq[0].unsqueeze(0))
+        output_seq, h_n = decoder(input=input_seq, hx=h_0)
     elif isinstance(decoder, nn.GRU):
-        output_seq, h_n = decoder(input=input_seq, hx=input_seq[0].unsqueeze(0))
+        output_seq, h_n = decoder(input=input_seq, hx=h_0)
     elif isinstance(decoder, nn.LSTM):
-        h_0, c_0 = input_seq[0].unsqueeze(0), input_seq[0].unsqueeze(0)
+        h_0, c_0 = h_0, h_0
         output_seq, h_n = decoder(input=input_seq, hx=(h_0, c_0))
     else:
         raise NotImplementedError

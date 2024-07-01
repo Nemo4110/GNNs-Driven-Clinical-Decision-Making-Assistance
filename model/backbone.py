@@ -131,6 +131,11 @@ class BackBone(nn.Module):
             for edge_type in self.edge_types
         } for hg in hgs]
 
+        dict_node_feat_ori = {
+            node_type: torch.stack([dict_node_feats[node_type] for dict_node_feats in list_dict_node_feats])
+            for node_type in self.node_types
+        }
+
         # go through gnns
         list_dict_node_feats = self.gnns(list_dict_node_feats, list_edge_index_dict, list_dict_edge_attrs)
 
@@ -140,8 +145,9 @@ class BackBone(nn.Module):
             for node_type in self.node_types
         }
         for node_type, node_feat in dict_node_feat.items():
+            node_feat_ori = dict_node_feat_ori[node_type][0].unsqueeze(0)
             node_feat = self.position_encoding(node_feat)  # Add position encoding
-            dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat)  # update
+            dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)  # update
 
         # Link predicting:
         dict_every_day_pred = {}

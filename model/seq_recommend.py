@@ -79,8 +79,9 @@ class SeqRecommend(nn.Module):
 
         # decode
         for node_type, node_feat in dict_node_feat.items():
+            node_feat_ori = node_feat[0].unsqueeze(0)
             node_feat = self.position_encoding(node_feat)  # Add position encoding
-            dict_node_feat[node_type] = decode(decoder=self.decoder[node_type], input_seq=node_feat)  # update
+            dict_node_feat[node_type] = decode(decoder=self.decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)
 
         # Link predicting:
         dict_every_day_pred = {}
