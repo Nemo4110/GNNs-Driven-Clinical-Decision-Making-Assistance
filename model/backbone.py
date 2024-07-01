@@ -53,12 +53,16 @@ class BackBone(nn.Module):
                  decoder_choice: str = "TransformerDecoder",
                  num_decoder_layers=6,
                  hidden_dim: int = 128,
+                 is_gnn_only: bool = False,
                  gnn_layer_num: int = 2):
         super().__init__()
 
         self.max_timestep = max_timestep
+        
         self.gnn_type = gnn_type
         self.gnn_layer_num = gnn_layer_num
+        self.is_gnn_only = is_gnn_only
+
         self.neg_smp_strategy = neg_smp_strategy
 
         self.node_types = node_types
@@ -139,15 +143,17 @@ class BackBone(nn.Module):
         # go through gnns
         list_dict_node_feats = self.gnns(list_dict_node_feats, list_edge_index_dict, list_dict_edge_attrs)
 
-        # decode
         dict_node_feat = {
             node_type: torch.stack([dict_node_feats[node_type] for dict_node_feats in list_dict_node_feats]) \
             for node_type in self.node_types
         }
-        for node_type, node_feat in dict_node_feat.items():
-            node_feat_ori = dict_node_feat_ori[node_type][0].unsqueeze(0)
-            node_feat = self.position_encoding(node_feat)  # Add position encoding
-            dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)  # update
+
+        # decode
+        if not self.is_gnn_only:
+            for node_type, node_feat in dict_node_feat.items():
+                node_feat_ori = dict_node_feat_ori[node_type][0].unsqueeze(0)
+                node_feat = self.position_encoding(node_feat)  # Add position encoding
+                dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)  # update
 
         # Link predicting:
         dict_every_day_pred = {}
