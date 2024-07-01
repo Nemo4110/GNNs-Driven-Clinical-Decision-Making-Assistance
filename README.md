@@ -43,23 +43,16 @@ In the CMD:
 
 ## data preprocess pipeline
 
-- Modify the `path_dataset` parameter in the both `preprocess_drugs.py` adn `preprocess_labitems.py` according to the path where you store the `mimic-iii v1.4` dataset.
-  - as well as modify the `path_ddi_dataset` parameter in `preprocess_drugs.py`, it specifies where you store the `ndc2rxnorm_mapping.txt` file
-  - `ndc2rxnorm_mapping.txt` file can be downloaded at: <https://github.com/BarryRun/COGNet/blob/master/data/ndc2rxnorm_mapping.txt>
-- Run the `python preprocess_drugs.py` and `python preprocess_labitems.py` CMD in the `dataset` directory.
-  - (OPTIONAL) For running `processes_drugs.ipynb` and `processes_labitems.ipynb`, you need modify all parameters relate to path according to the path where you store the `mimic-iii v1.4` dataset and the `DDI` directory.
-    - the original context of `DDI` directory can be downloaded at: <https://github.com/BarryRun/COGNet/tree/master/data>
-  - Some unit cells in `processes.ipynb` may run out of time, this is why we recommend to use the equivalent `preprocess_drugs.py` adn `preprocess_labitems.py` scripts instead.
-
-## dataset split
-
-In the `construct_graph.py`, there are 3 parameter need to modify:
-
-- `path_dataset` is the path where you store the `mimic-iii v1.4` dataset
-- `batch_size` is the hyperparemeter specifies how many patient nodes contian in a single $\mathcal{DTDG}$. It's set to $128$ by default due to our experiment has shown this number is appreciate.
-- `path_hgs` specifies where you want to store the $\mathcal{DTDG}$s.
-
-Run all unit cells! DONE.
+1. Modify path configuration in `utils.constant`
+2. Download following files, and store them in `constant.PATH_DDI_DATA` directory:
+   1. `ndc2rxnorm_mapping.txt`, `drug-atc.csv`, `drug-DDI.csv`, `ndc2atc_level4.csv`, `idx2drug.pkl`
+      - from https://github.com/BarryRun/COGNet/blob/master/data/
+   2. `TWOSIDES.csv.gz` 
+      - from http://tatonettilab-resources.s3-website-us-west-1.amazonaws.com/?p=nsides/
+3. Run cmd `python processing.py` under WWW'22 COGNet repo (need to `git clone` it in another directory) to obtain the `voc_final.pkl` file for DDI calculation
+4. In our proj, `CD ./dataset`, then run cmd `preprocess_drugs.py`, `preprocess_labitems.py`, `construct_hgs.py` for generating data
+   - In the `construct_graph.py`, `batch_size` is the hyperparemeter specifies how many patient nodes contian in a single $\mathcal{DTDG}$. 
+   - It's set to $128$ by default due to our experiment has shown this number is appreciate.
 
 ## train and test
 
