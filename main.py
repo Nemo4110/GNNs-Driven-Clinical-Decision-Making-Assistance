@@ -33,7 +33,8 @@ if __name__ == '__main__':
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder", help="Decoder choice")
     parser.add_argument("--hidden_dim",                   type=int,   default=128,                  help="hidden dimension")
     parser.add_argument("--lr",                           type=float, default=0.0003,               help="learning rate")
-    parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation")
+    parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation (without GNN)")
+    parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="specify whether to only use GNN")
 
     # Paths
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
@@ -72,6 +73,7 @@ if __name__ == '__main__':
             max_timestep=args.max_timestep,
             gnn_type=args.gnn_type,
             gnn_layer_num=args.gnn_layer_num,
+            is_gnn_only=args.is_gnn_only,
             node_types=node_types,
             edge_types=edge_types,
             decoder_choice=args.decoder_choice,
