@@ -10,6 +10,7 @@ from d2l import torch as d2l
 
 from dataset.hgs import DiscreteTimeHeteroGraph
 from model.backbone import BackBone
+from model.seq_recommend import SeqRecommend
 from utils.metrics import Logger
 from utils.best_thresholds import BestThreshldLogger
 from utils.misc import calc_loss, node_type_to_prefix
@@ -21,16 +22,18 @@ if __name__ == '__main__':
 
     # ********* Hyperparams ********* #
     # following arguments are model settings
-    parser.add_argument("--max_timestep", type=int,                 default=20,         help="The maximum `TIMESTEP`")
+
     # NOTE: when max_timestep set to 30 or 50,
     #       would trigger the assert error "last timestep has not labels!"
     #       in `get_subgraph_by_timestep` (bigger max_timestep can be support in future)
+    parser.add_argument("--max_timestep",                 type=int,   default=20,                   help="The maximum `TIMESTEP`")
     parser.add_argument("--gnn_type",                                 default="GENConv",            help="Specify the `conv` that being used as MessagePassing")
     parser.add_argument("--gnn_layer_num",                type=int,   default=2,                    help="Number of gnn layers")
     parser.add_argument("--num_decoder_layers",           type=int,   default=6,                    help="Number of decoder layers")
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder", help="Decoder choice")
     parser.add_argument("--hidden_dim",                   type=int,   default=128,                  help="hidden dimension")
     parser.add_argument("--lr",                           type=float, default=0.0003,               help="learning rate")
+    parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation")
 
     # Paths
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
@@ -64,17 +67,28 @@ if __name__ == '__main__':
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type() if args.task=="MIX" else HeteroGraphConfig.use_one_edge_type(item_type=args.task)
 
     # model
-    model: nn.Module = BackBone(
-        max_timestep=args.max_timestep,
-        gnn_type=args.gnn_type,
-        gnn_layer_num=args.gnn_layer_num,
-        node_types=node_types,
-        edge_types=edge_types,
-        decoder_choice=args.decoder_choice,
-        num_decoder_layers=args.num_decoder_layers,
-        hidden_dim=args.hidden_dim,
-        neg_smp_strategy=args.neg_smp_strategy
-    ).to(device)
+    if not args.use_seq_rec:
+        model: nn.Module = BackBone(
+            max_timestep=args.max_timestep,
+            gnn_type=args.gnn_type,
+            gnn_layer_num=args.gnn_layer_num,
+            node_types=node_types,
+            edge_types=edge_types,
+            decoder_choice=args.decoder_choice,
+            num_decoder_layers=args.num_decoder_layers,
+            hidden_dim=args.hidden_dim,
+            neg_smp_strategy=args.neg_smp_strategy
+        ).to(device)
+    else:
+        model: nn.Module = SeqRecommend(
+            max_timestep=args.max_timestep,
+            neg_smp_strategy=args.neg_smp_strategy,
+            node_types=node_types,
+            edge_types=edge_types,
+            decoder_choice=args.decoder_choice,
+            num_layers=args.num_decoder_layers,
+            hidden_dim=args.hidden_dim
+        ).to(device)
 
     if args.train:
         best_threshold_loggers = {

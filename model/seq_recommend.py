@@ -77,6 +77,8 @@ class SeqRecommend(nn.Module):
             for node_type in self.node_types
         }
 
+        # without going through GNN
+
         # decode
         for node_type, node_feat in dict_node_feat.items():
             node_feat_ori = node_feat[0].unsqueeze(0)
