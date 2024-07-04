@@ -56,16 +56,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     root_path = os.path.join(args.root_path_dataset, f"batch_size_{args.batch_size_by_HADMID}")
-    resl_path = os.path.join(args.path_dir_results, f"#{args.test_num}")
-
-    if not os.path.exists(resl_path):               os.mkdir(resl_path)
-    if not os.path.exists(args.path_dir_model_hub): os.mkdir(args.path_dir_model_hub)
-    if not os.path.exists(args.path_dir_thresholds):os.mkdir(args.path_dir_thresholds)
 
     device = d2l.try_gpu(args.num_gpu) if args.use_gpu else torch.device('cpu')
 
     # Heterogeneous graph config
-    node_types, edge_types = HeteroGraphConfig.use_all_edge_type() if args.task=="MIX" else HeteroGraphConfig.use_one_edge_type(item_type=args.task)
+    if args.task == "MIX":
+        node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    else:
+        node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.task)
 
     # model
     if not args.use_seq_rec:
@@ -93,6 +91,11 @@ if __name__ == '__main__':
         ).to(device)
 
     if args.train:
+        if not os.path.exists(args.path_dir_model_hub):
+            os.mkdir(args.path_dir_model_hub)
+        if not os.path.exists(args.path_dir_thresholds):
+            os.mkdir(args.path_dir_thresholds)
+
         best_threshold_loggers = {
             node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
             for node_type in node_types if node_type != 'admission'
@@ -113,7 +116,7 @@ if __name__ == '__main__':
 
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
                 optimizer.step()  # optimizing
 
                 # log the best_threshold
@@ -134,6 +137,10 @@ if __name__ == '__main__':
 
     # testing
     if args.test:
+        resl_path = os.path.join(args.path_dir_results, f"#{args.test_num}")
+        if not os.path.exists(resl_path):
+            os.mkdir(resl_path)
+
         test_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="test")
 
         if not args.train:
