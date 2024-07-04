@@ -6,7 +6,6 @@ import torch.nn as nn
 import utils.constant as constant
 
 from tqdm import tqdm
-from d2l import torch as d2l
 
 from dataset.hgs import DiscreteTimeHeteroGraph
 from model.backbone import BackBone
@@ -31,10 +30,11 @@ if __name__ == '__main__':
     parser.add_argument("--gnn_layer_num",                type=int,   default=2,                    help="Number of gnn layers")
     parser.add_argument("--num_decoder_layers",           type=int,   default=6,                    help="Number of decoder layers")
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder", help="Decoder choice")
-    parser.add_argument("--hidden_dim",                   type=int,   default=128,                  help="hidden dimension")
+    parser.add_argument("--hidden_dim",                   type=int,   default=32,                   help="hidden dimension")
     parser.add_argument("--lr",                           type=float, default=0.0003,               help="learning rate")
     parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation (without GNN)")
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="specify whether to only use GNN")
+    parser.add_argument("--is_seq_pred",      action="store_true",    default=False,                help="specify whether to enable seq pred")
 
     # Paths
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
@@ -62,7 +62,7 @@ if __name__ == '__main__':
     if not os.path.exists(args.path_dir_model_hub): os.mkdir(args.path_dir_model_hub)
     if not os.path.exists(args.path_dir_thresholds):os.mkdir(args.path_dir_thresholds)
 
-    device = d2l.try_gpu(args.num_gpu) if args.use_gpu else torch.device('cpu')
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
 
     # Heterogeneous graph config
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type() if args.task=="MIX" else HeteroGraphConfig.use_one_edge_type(item_type=args.task)
@@ -79,7 +79,8 @@ if __name__ == '__main__':
             decoder_choice=args.decoder_choice,
             num_decoder_layers=args.num_decoder_layers,
             hidden_dim=args.hidden_dim,
-            neg_smp_strategy=args.neg_smp_strategy
+            neg_smp_strategy=args.neg_smp_strategy,
+            is_seq_pred=args.is_seq_pred
         ).to(device)
     else:
         model: nn.Module = SeqRecommend(
@@ -89,7 +90,8 @@ if __name__ == '__main__':
             edge_types=edge_types,
             decoder_choice=args.decoder_choice,
             num_layers=args.num_decoder_layers,
-            hidden_dim=args.hidden_dim
+            hidden_dim=args.hidden_dim,
+            is_seq_pred=args.is_seq_pred
         ).to(device)
 
     if args.train:
@@ -108,8 +110,9 @@ if __name__ == '__main__':
             t_loop_train_set = tqdm(train_set, leave=False)
             for hg in t_loop_train_set:
                 hg = hg.to(device)
-                dict_every_day_pred = model(hg)
-                loss = calc_loss(dict_every_day_pred, node_types, device)  # calculating loss
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+                    dict_every_day_pred = model(hg)
+                    loss = calc_loss(dict_every_day_pred, node_types, device, is_seq_pred=args.is_seq_pred)
 
                 optimizer.zero_grad()
                 loss.backward()

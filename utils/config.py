@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 
 
+class SpecialToken:
+    def __init__(self, voc_size: int):
+        self.SOS: int = voc_size
+        self.EOS: int = voc_size + 1
+        self.PAD: int = voc_size + 2
+
+
 @dataclass
 class MappingManager:
     node_type_to_node_num = {
@@ -17,6 +24,10 @@ class MappingManager:
         ('labitem', 'rev_did', 'admission'): 2,
         ("admission", "took", "drug"): 7,
         ("drug", "rev_took", "admission"): 7
+    }
+    node_type_to_special_token = {
+        node_type: SpecialToken(voc_size)
+        for node_type, voc_size in node_type_to_node_num.items()
     }
 
 
@@ -44,6 +55,9 @@ class HeteroGraphConfig:
             raise NotImplementedError
 
         return node_types, edge_types
+
+
+max_seq_length = 150
 
 
 if __name__ == "__main__":

@@ -92,8 +92,8 @@ def construct_dynamic_hetero_graph(df_admissions_curr,
     nodes_feature_drug_ndc = torch.from_numpy(df_drug_ndc_feat_curr[list_selected_drug_ndc_columns].values)
 
     ############################################### Edges #######################################################
-    df_labevents_curr.sort_values(by=["HADM_ID", "ITEMID"], inplace=True)
-    df_prescriptions_curr.sort_values(by=["HADM_ID", "NDC"], inplace=True)
+    df_labevents_curr.sort_values(by=["HADM_ID", "TIMESTEP", "CHARTTIME"], inplace=True)
+    df_prescriptions_curr.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE"], inplace=True)
 
     ## Edge indexes
     ### Create a mapping from unique hadm_id indices to range [0, num_hadm_nodes):
@@ -200,8 +200,14 @@ if __name__ == "__main__":
 
     df_admissions    = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS_NEW.csv.gz"))
     df_labitems      = pd.read_csv(os.path.join(path_dataset, "D_LABITEMS_NEW.csv.gz"))
+
     df_labevents     = pd.read_csv(os.path.join(path_dataset, "LABEVENTS_PREPROCESSED.csv.gz"))
+    df_labevents["CHARTTIME"] = pd.to_datetime(df_labevents["CHARTTIME"], format="%Y-%m-%d %H:%M:%S")
+
     df_prescriptions = pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS_PREPROCESSED.csv.gz"))
+    df_prescriptions["STARTDATE"] = pd.to_datetime(df_prescriptions["STARTDATE"], format="%Y-%m-%d")
+    df_prescriptions["ENDDATE"]   = pd.to_datetime(df_prescriptions["ENDDATE"],   format="%Y-%m-%d")
+
     df_drug_ndc_feat = pd.read_csv(os.path.join(path_dataset, "DRUGS_NDC_FEAT.csv.gz"))
 
     list_total_hadmid = get_list_total_hadmid(df_labevents, df_prescriptions)

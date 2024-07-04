@@ -7,7 +7,8 @@ from torch_geometric.nn import to_hetero
 from typing import List, Tuple
 
 from dataset.hgs import DiscreteTimeHeteroGraph
-from utils.config import HeteroGraphConfig, MappingManager
+from utils.config import HeteroGraphConfig, MappingManager, max_seq_length
+from utils.misc import calc_loss
 from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode
 
 
@@ -54,6 +55,7 @@ class BackBone(nn.Module):
                  num_decoder_layers=6,
                  hidden_dim: int = 128,
                  is_gnn_only: bool = False,
+                 is_seq_pred: bool = False,
                  gnn_layer_num: int = 2):
         super().__init__()
 
@@ -70,17 +72,44 @@ class BackBone(nn.Module):
 
         self.decoder_choice = decoder_choice
         self.num_decoder_layers = num_decoder_layers
+
+        self.is_seq_pred = is_seq_pred
         self.hidden_dim = hidden_dim
 
         # EMBD
-        # ~~Think about the first args of `nn.Embedding` here should equal to~~
-        #  - max of total `HADM_ID`?
-        #  - current batch_size of `HADM_ID`?
-        #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
-        self.module_dict_embedding = nn.ModuleDict({
-            node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type], self.hidden_dim) \
-            for node_type in self.node_types if node_type != 'admission'
-        })
+        if self.is_seq_pred:
+            # +3 for SOS, EOS, PAD
+            self.module_dict_embedding = nn.ModuleDict({
+                node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type] + 3, self.hidden_dim) \
+                for node_type in self.node_types if node_type != 'admission'
+            })
+
+            self.module_dict_ffc = nn.ModuleDict({
+                node_type: nn.Linear(self.hidden_dim, MappingManager.node_type_to_node_num[node_type] + 3)
+                for node_type in self.node_types if node_type != 'admission'
+            })
+
+            # share weights
+            for node_type in self.node_types:
+                if node_type == 'admission':
+                    continue
+                else:
+                    self.module_dict_ffc[node_type].weight = self.module_dict_embedding[node_type].weight
+        else:
+            # ~~Think about the first args of `nn.Embedding` here should equal to~~
+            #  - max of total `HADM_ID`?
+            #  - current batch_size of `HADM_ID`?
+            #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
+            self.module_dict_embedding = nn.ModuleDict({
+                node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type], self.hidden_dim) \
+                for node_type in self.node_types if node_type != 'admission'
+            })
+
+            # LIKES_PREDICTOR
+            self.module_dict_links_predictor = nn.ModuleDict({
+                node_type: LinksPredictor(hidden_dim=self.hidden_dim) \
+                for node_type in self.node_types if node_type != "admission"
+            })
 
         # PROJ
         self.module_dict_node_feat_proj = nn.ModuleDict({
@@ -103,12 +132,6 @@ class BackBone(nn.Module):
         self.module_dict_decoder = nn.ModuleDict({
             node_type: get_decoder_by_choice(choice=self.decoder_choice, hidden_dim=self.hidden_dim, num_layers=self.num_decoder_layers)
             for node_type in self.node_types
-        })
-
-        # LIKES_PREDICTOR
-        self.module_dict_links_predictor = nn.ModuleDict({
-            node_type: LinksPredictor(hidden_dim=self.hidden_dim) \
-            for node_type in self.node_types if node_type != "admission"
         })
 
         self.reset_parameters()
@@ -154,32 +177,38 @@ class BackBone(nn.Module):
                 node_feat_ori = dict_node_feat_ori[node_type][0].unsqueeze(0)
                 node_feat = self.position_encoding(node_feat)  # Add position encoding
                 dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)  # update
+                # [T, B, H]
 
-        # Link predicting:
         dict_every_day_pred = {}
-        for node_type in self.node_types:
-            if node_type == "admission":  # admission is not the goal of prediction
+        for edge_type in self.edge_types:
+            if 'rev' in edge_type[1]:
                 continue
-            elif node_type == "drug":
-                dict_every_day_pred[node_type] = {
-                    "scores": [self.module_dict_links_predictor[node_type](dict_node_feat["admission"][curr_timestep],
-                                                                           dict_node_feat["drug"][curr_timestep],
-                                                                           hg.labels4drug_index) \
-                               for curr_timestep, hg in enumerate(hgs)],
-                    "labels":  [hg.labels4drug       for hg in hgs],
-                    "indices": [hg.labels4drug_index for hg in hgs]
-                }
-            elif node_type == "labitem":
-                dict_every_day_pred[node_type] = {
-                    "scores": [self.module_dict_links_predictor[node_type](dict_node_feat["admission"][curr_timestep],
-                                                                           dict_node_feat["labitem"][curr_timestep],
-                                                                           hg.lables4item_index) \
-                               for curr_timestep, hg in enumerate(hgs)],
-                    "labels":  [hg.lables4item       for hg in hgs],
-                    "indices": [hg.lables4item_index for hg in hgs]
-                }
             else:
-                raise f"check the node_types config! curr: {self.node_types}"
+                user_node_type = edge_type[0]
+                item_node_type = edge_type[-1]
+                if self.is_seq_pred:
+                    node_feat = dict_node_feat[user_node_type].unsqueeze(-2).repeat(1, 1, max_seq_length, 1)
+                    batch_size = node_feat.size(1)
+                    node_feat = self.module_dict_ffc[item_node_type](node_feat.view(-1, self.hidden_dim))
+                    scores = node_feat.view(self.max_timestep, batch_size, max_seq_length, -1)
+                    dict_every_day_pred[item_node_type] = {
+                        "scores": scores,  # [T, B, X, C]
+                        "labels": torch.stack([hg[edge_type].seq_labels for hg in hgs], dim=0),  # [T, B, X]
+                        "indices": [hg[edge_type].labels_index for hg in hgs]
+                    }
+                else:
+                    dict_every_day_pred[item_node_type] = {
+                        "scores": [
+                            # Link predicting:
+                            self.module_dict_links_predictor[item_node_type](
+                                dict_node_feat[user_node_type][curr_timestep],
+                                dict_node_feat[item_node_type][curr_timestep],
+                                hg[edge_type].labels_index
+                            ) for curr_timestep, hg in enumerate(hgs)
+                        ],
+                        "labels": [hg[edge_type].labels for hg in hgs],
+                        "indices": [hg[edge_type].labels_index for hg in hgs]
+                    }
 
         return dict_every_day_pred
 
@@ -192,7 +221,12 @@ if __name__ == "__main__":
         node_types=node_types,
         edge_types=edge_types,
         num_decoder_layers=6,
-        hidden_dim=128,
-        neg_smp_strategy=0
+        neg_smp_strategy=0,
+        hidden_dim=32,
+        is_seq_pred=True
     )
-    print(model)
+
+    train_set = DiscreteTimeHeteroGraph(root_path=r"..\dataset\batch_size_128", usage="train")
+    dict_every_day_pred = model(train_set[0])
+    # loss = calc_loss(dict_every_day_pred, node_types, device=torch.device('cpu'), is_seq_pred=True)
+    # print(loss)
