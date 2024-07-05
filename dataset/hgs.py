@@ -4,7 +4,10 @@ import torch_geometric.transforms as T
 
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.utils import negative_sampling
+from torch_geometric.loader import DataLoader
 from tqdm import tqdm
+
+from typing import List
 
 
 class DiscreteTimeHeteroGraph(Dataset):
@@ -22,7 +25,17 @@ class DiscreteTimeHeteroGraph(Dataset):
 
     def get(self, idx):
         return torch.load(os.path.join(self.root_path, self.pt_files[idx]))
-    
+
+    @staticmethod
+    def pack_batch(hgs: List[HeteroData], max_timestep: int):
+        r"""
+        Args:
+            hgs:
+            max_timestep: how many sub graphs (days) to pack into a batch
+        """
+        loader = DataLoader(hgs, batch_size=max_timestep)
+        return next(iter(loader))
+
     @staticmethod
     def get_subgraph_by_timestep(hg: HeteroData, timestep: int, neg_smp_strategy: int=0):
         r"""
@@ -35,94 +48,49 @@ class DiscreteTimeHeteroGraph(Dataset):
         device = hg["admission", "did", "labitem"].timestep.device
 
         # https://discuss.pytorch.org/t/typeerror-expected-tensoroptions-dtype-float-device-cpu-layout-strided-requires-grad-false-default-pinned-memory-false-default-memory-format-nullopt/159558
-        mask4item = (hg["admission", "did", "labitem"].timestep == timestep).to(device)
-        eidx4item = hg["admission", "did", "labitem"].edge_index[:, mask4item]
-        ex4item   = hg["admission", "did", "labitem"].x[mask4item, :]
-
-        mask4drug = (hg["admission", "took", "drug"].timestep == timestep).to(device)
-        eidx4drug = hg["admission", "took", "drug"].edge_index[:, mask4drug]
-        ex4drug   = hg["admission", "took", "drug"].x[mask4drug, :]
 
         sub_hg = HeteroData()
 
-        # Nodes
-        sub_hg["admission"].node_id = hg["admission"].node_id.clone()
-        sub_hg["admission"].x       = hg["admission"].x.clone().float()
-
-        sub_hg["labitem"].node_id = hg["labitem"].node_id.clone()
-        sub_hg["labitem"].x       = hg["labitem"].x.clone().float()
-
-        sub_hg["drug"].node_id = hg["drug"].node_id.clone()
-        sub_hg["drug"].x       = hg["drug"].x.clone().float()
+        # NODE (copied directly)
+        for node_type in hg.node_types:
+            sub_hg[node_type].node_id = hg[node_type].node_id.clone()
+            sub_hg[node_type].x = hg[node_type].x.clone().float()
 
         # Edges
-        sub_hg["admission", "did", "labitem"].edge_index = eidx4item.clone()
-        sub_hg["admission", "did", "labitem"].x          = ex4item.clone().float()
+        for edge_type in hg.edge_types:
+            mask = (hg[edge_type].timestep == timestep).to(device)
+            eidx = hg[edge_type].edge_index[:, mask]
+            ex = hg[edge_type].x[mask, :]
 
-        sub_hg["admission", "took", "drug"].edge_index = eidx4drug.clone()
-        sub_hg["admission", "took", "drug"].x          = ex4drug.clone().float()
+            sub_hg[edge_type].edge_index = eidx.clone()
+            sub_hg[edge_type].x = ex.clone().float()
 
-        assert timestep < torch.max(hg["admission", "did", "labitem"].timestep), "last timestep has not labels!"
-        assert timestep < torch.max(hg["admission", "took", "drug"].timestep),   "last timestep has not labels!"
+            assert timestep < torch.max(hg[edge_type].timestep), "last timestep has not labels!"
 
-        mask_next_t4item = (hg["admission", "did", "labitem"].timestep == (timestep+1)).to(device)
-        sub_hg.labels4item_pos_index = hg["admission", "did", "labitem"].edge_index[:, mask_next_t4item].clone()
-        if neg_smp_strategy == 0:
-            sub_hg.labels4item_neg_index = negative_sampling(
-                sub_hg.labels4item_pos_index,
-                num_neg_samples=sub_hg.labels4item_pos_index.shape[1] * 2,
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
-            ).to(device)
-        elif 1 <= neg_smp_strategy <= 100:
-            sub_hg.labels4item_neg_index = negative_sampling(
-                sub_hg.labels4item_pos_index,
-                num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
-            ).to(device)
-        elif neg_smp_strategy == -1:  # use the full labitem set
-            sub_hg.labels4item_neg_index = negative_sampling(
-                sub_hg.labels4item_pos_index,
-                num_neg_samples=sub_hg["admission"].node_id.shape[0] * sub_hg["labitem"].node_id.shape[0],
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["labitem"].node_id.shape[0])
-            ).to(device)
-        else:
-            raise ValueError
-        sub_hg.lables4item_index = torch.cat((sub_hg.labels4item_pos_index, sub_hg.labels4item_neg_index), dim=1)
-        sub_hg.lables4item = torch.cat((torch.ones(sub_hg.labels4item_pos_index.shape[1]),
-                                        torch.zeros(sub_hg.labels4item_neg_index.shape[1])), dim=0).to(device)
-        index4item_shuffle = torch.randperm(sub_hg.lables4item_index.shape[1]).to(device)
-        sub_hg.lables4item_index = sub_hg.lables4item_index[:, index4item_shuffle]
-        sub_hg.lables4item = sub_hg.lables4item[index4item_shuffle]
+            mask_next_t = (hg[edge_type].timestep == (timestep+1)).to(device)
+            sub_hg[edge_type].pos_index = hg[edge_type].edge_index[:, mask_next_t].clone()
 
-        mask_next_t4drug = (hg["admission", "took", "drug"].timestep == (timestep+1)).to(device)
-        sub_hg.labels4drug_pos_index = hg["admission", "took", "drug"].edge_index[:, mask_next_t4drug].clone()
-        if neg_smp_strategy == 0:
-            sub_hg.labels4drug_neg_index = negative_sampling(
-                sub_hg.labels4drug_pos_index,
-                num_neg_samples=sub_hg.labels4drug_pos_index.shape[1] * 2,
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
-            ).to(device)
-        elif 1 <= neg_smp_strategy <= 100:
-            sub_hg.labels4drug_neg_index = negative_sampling(
-                sub_hg.labels4drug_pos_index,
-                num_neg_samples=sub_hg["admission"].node_id.shape[0] * neg_smp_strategy,
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
-            ).to(device)
-        elif neg_smp_strategy == -1:  # use the full labitem set
-            sub_hg.labels4drug_neg_index = negative_sampling(
-                sub_hg.labels4drug_pos_index,
-                num_neg_samples=sub_hg["admission"].node_id.shape[0] * sub_hg["drug"].node_id.shape[0],
-                num_nodes=(sub_hg["admission"].node_id.shape[0], sub_hg["drug"].node_id.shape[0])
-            ).to(device)
-        else:
-            raise ValueError
-        sub_hg.labels4drug_index = torch.cat((sub_hg.labels4drug_pos_index, sub_hg.labels4drug_neg_index), dim=1)
-        sub_hg.labels4drug = torch.cat((torch.ones(sub_hg.labels4drug_pos_index.shape[1]),
-                                        torch.zeros(sub_hg.labels4drug_neg_index.shape[1])), dim=0).to(device)
-        index4drug_shuffle = torch.randperm(sub_hg.labels4drug_index.shape[1]).to(device)
-        sub_hg.labels4drug_index = sub_hg.labels4drug_index[:, index4drug_shuffle]
-        sub_hg.labels4drug = sub_hg.labels4drug[index4drug_shuffle]
+            num_pos_edges = sub_hg[edge_type].pos_index.shape[1]
+            num_adm_nodes = sub_hg["admission"].node_id.shape[0]
+            num_itm_nodes = sub_hg[edge_type[-1]].node_id.shape[0]
+            if neg_smp_strategy == 0:
+                sub_hg[edge_type].neg_index = negative_sampling(sub_hg[edge_type].pos_index, (num_adm_nodes, num_itm_nodes), num_neg_samples=num_pos_edges * 2).to(device)
+            elif 1 <= neg_smp_strategy <= 100:
+                sub_hg[edge_type].neg_index = negative_sampling(sub_hg[edge_type].pos_index, (num_adm_nodes, num_itm_nodes), num_neg_samples=num_pos_edges * neg_smp_strategy).to(device)
+            elif neg_smp_strategy == -1:
+                sub_hg[edge_type].neg_index = negative_sampling(sub_hg[edge_type].pos_index, (num_adm_nodes, num_itm_nodes), num_neg_samples=num_adm_nodes * num_itm_nodes).to(device)
+            else:
+                raise ValueError
 
+            sub_hg[edge_type].labels_index = torch.cat((sub_hg[edge_type].pos_index, sub_hg[edge_type].neg_index), dim=1)
+            sub_hg[edge_type].labels       = torch.cat(
+                (torch.ones(sub_hg[edge_type].pos_index.shape[1]),
+                          torch.zeros(sub_hg[edge_type].neg_index.shape[1])),
+                dim=0
+            ).to(device)
+            index_shuffle = torch.randperm(sub_hg[edge_type].labels_index.shape[1]).to(device)
+            sub_hg[edge_type].labels_index = sub_hg[edge_type].labels_index[:, index_shuffle]
+            sub_hg[edge_type].labels = sub_hg[edge_type].labels[index_shuffle]
         # We also need to make sure to add the reverse edges from labitems to admission
         # in order to let a GNN be able to pass messages in both directions.
         # We can leverage the `T.ToUndirected()` transform for this from PyG:
@@ -132,6 +100,12 @@ class DiscreteTimeHeteroGraph(Dataset):
 
 
 if __name__ == "__main__":
-    train_set = DiscreteTimeHeteroGraph(root_path=r"D:\Datasets\mimic\mimic-iii-hgs-new\batch_size_128", usage="val")
-    for hg in tqdm(train_set):
-        assert max(hg["admission"].node_id) >= max(hg["admission", "did", "labitem"].edge_index[0])
+    dataset = DiscreteTimeHeteroGraph(root_path=r".\batch_size_128", usage="train")
+    hg = dataset[0]
+    max_timestep = 20
+    hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=0) for t in range(max_timestep)]
+    loader = DataLoader(hgs, batch_size=max_timestep)
+    batch_hg = next(iter(loader))
+    print(batch_hg)
+    # for k, v in batch_hg.collect('x').items():
+    #     print(k, v.shape)
