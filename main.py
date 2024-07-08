@@ -2,6 +2,7 @@ import argparse
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import utils.constant as constant
 
@@ -10,6 +11,7 @@ from tqdm import tqdm
 from dataset.hgs import DiscreteTimeHeteroGraph
 from model.backbone import BackBone
 from model.seq_recommend import SeqRecommend
+from model.layers import MaskedSoftmaxCELoss
 from utils.metrics import Logger, SeqLogger
 from utils.best_thresholds import BestThreshldLogger
 from utils.misc import calc_loss, node_type_to_prefix
@@ -99,6 +101,9 @@ if __name__ == '__main__':
                 node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
                 for node_type in node_types if node_type != 'admission'
             }
+            loss_f = F.binary_cross_entropy_with_logits
+        else:
+            loss_f = MaskedSoftmaxCELoss()
 
         train_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -112,7 +117,7 @@ if __name__ == '__main__':
                 hg = hg.to(device)
                 with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     dict_every_day_pred = model(hg)
-                    loss = calc_loss(dict_every_day_pred, node_types, device, is_seq_pred=args.is_seq_pred)
+                    loss = calc_loss(dict_every_day_pred, node_types, device, loss_f, is_seq_pred=args.is_seq_pred)
 
                 optimizer.zero_grad()
                 loss.backward()

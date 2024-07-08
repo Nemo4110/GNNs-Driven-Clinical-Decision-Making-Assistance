@@ -26,8 +26,8 @@ sys.path.append('..')
 def cal_jaccard(y_true: torch.tensor, y_pred: torch.tensor):
     if y_true.numel() == 0 or y_pred.numel() == 0:
         return 0
-    set1 = set(y_true)
-    set2 = set(y_pred)
+    set1 = set(y_true.tolist())
+    set2 = set(y_pred.tolist())
     a, b = len(set1 & set2), len(set1 | set2)
     return a / b
 
@@ -51,54 +51,64 @@ class SeqLogger:
         self.calc_metrics_for_batch(scores, labels)
 
     def calc_metrics_for_batch(self, scores: torch.tensor, labels: torch.tensor):
-        scores = scores.cpu().permute(1, 0, 2, 3)  # [B, T, X, H]
-        labels = labels.cpu().permute(1, 0, 2)  # [B, T, X]
+        scores = scores.cpu().permute(1, 0, 2, 3).contiguous()  # [B, T, X, H]
+        labels = labels.cpu().permute(1, 0, 2).contiguous()  # [B, T, X]
 
-        for cur_adm_scr, cur_adm_lbl in zip(scores, labels):
+        t_loop = tqdm(zip(scores, labels), total=scores.size(0), leave=False)
+        for cur_adm_scr, cur_adm_lbl in t_loop:
             # flatten
-            cur_adm_scr = cur_adm_scr.contiguous().view(-1, cur_adm_scr.size(-1))  # [T*X, H]
-            cur_adm_lbl = cur_adm_lbl.contiguous().view(-1)  # [T*X]
+            cur_adm_scr = cur_adm_scr.view(-1, cur_adm_scr.size(-1))  # [T*X, H]
+            cur_adm_lbl = cur_adm_lbl.view(-1)  # [T*X]
 
             # filter out special tokens (PAD)
-            no_pad_indices = (cur_adm_lbl != cur_adm_scr.size(-1)).int()
+            no_pad_indices = (cur_adm_lbl != (cur_adm_scr.size(-1) - 1))
+            no_pad_indices = torch.nonzero(no_pad_indices).flatten()
+
             cur_adm_scr = torch.index_select(cur_adm_scr, 0, no_pad_indices)
             cur_adm_lbl = torch.index_select(cur_adm_lbl, 0, no_pad_indices)
 
-            # for solving: number of classes in y_true not equal to the number of columns in 'y_score' when calc rocauc
-            cur_adm_scr = cur_adm_scr[:, :-1]  # drop last dimension of PAD
-
-            cur_adm_scr = F.softmax(cur_adm_scr, dim=-1)
-            cur_adm_prd = torch.argmax(cur_adm_scr, dim=-1)  # TODO: beam search
+            cur_adm_prd = torch.argmax(F.softmax(cur_adm_scr, dim=-1), dim=-1)  # TODO: beam search
 
             auroc = MulticlassAUROC(num_classes=cur_adm_scr.size(-1))
             auroc.update(cur_adm_scr, cur_adm_lbl)
-            self.result['rocauc'].append(auroc.compute().item())
+            rocauc = auroc.compute().item()
+            self.result['rocauc'].append(rocauc)
 
             auprc = MulticlassAUPRC(num_classes=cur_adm_scr.size(-1))
             auprc.update(cur_adm_scr, cur_adm_lbl)
-            self.result['prauc'].append(auprc.compute().item())
+            prauc = auprc.compute().item()
+            self.result['prauc'].append(prauc)
 
             accuracy = MulticlassAccuracy()
             accuracy.update(cur_adm_prd, cur_adm_lbl)
-            self.result['accuracy'].append(accuracy.compute().item())
+            acc = accuracy.compute().item()
+            self.result['accuracy'].append(acc)
 
             self.result['jaccard'].append(cal_jaccard(y_true=cur_adm_lbl, y_pred=cur_adm_prd))
 
             precision = MulticlassPrecision(num_classes=cur_adm_scr.size(-1))
             precision.update(cur_adm_prd, cur_adm_lbl)
-            self.result['precision'].append(precision.compute().item())
+            prc = precision.compute().item()
+            self.result['precision'].append(prc)
 
             recall = MulticlassRecall(num_classes=cur_adm_scr.size(-1))
             recall.update(cur_adm_prd, cur_adm_lbl)
-            self.result['recall'].append(recall.compute().item())
+            rec = recall.compute().item()
+            self.result['recall'].append(rec)
 
             f1 = MulticlassF1Score(num_classes=cur_adm_scr.size(-1))
             f1.update(cur_adm_prd, cur_adm_lbl)
-            self.result['f1'].append(f1.compute().item())
+            f1_s = f1.compute().item()
+            self.result['f1'].append(f1_s)
 
             if self.is_calc_ddi:
-                self.result['ddi_pred'].append(self.ddi_calculator.calc_ddi_rate(cur_adm_prd.unique()))
-                self.result['ddi_true'].append(self.ddi_calculator.calc_ddi_rate(cur_adm_lbl.unique()))
+                ddi_pd = self.ddi_calculator.calc_ddi_rate(cur_adm_prd.unique())
+                ddi_gt = self.ddi_calculator.calc_ddi_rate(cur_adm_lbl.unique())
+                self.result['ddi_pred'].append(ddi_pd)
+                self.result['ddi_true'].append(ddi_gt)
+                t_loop.set_postfix_str(f'\033[32m auc:{rocauc:.4f}, acc:{acc:.4f}, f1:{f1_s:.4f}, ddi-> pd:{ddi_pd:.4f}, gt:{ddi_gt:.4f} \033[0m')
+            else:
+                t_loop.set_postfix_str(f'\033[32m auc:{rocauc:.4f}, acc:{acc:.4f}, f1:{f1_s:.4f} \033[0m')
 
     def save(self, description):
         result = {}
