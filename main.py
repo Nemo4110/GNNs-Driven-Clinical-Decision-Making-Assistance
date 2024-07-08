@@ -10,7 +10,7 @@ from tqdm import tqdm
 from dataset.hgs import DiscreteTimeHeteroGraph
 from model.backbone import BackBone
 from model.seq_recommend import SeqRecommend
-from utils.metrics import Logger
+from utils.metrics import Logger, SeqLogger
 from utils.best_thresholds import BestThreshldLogger
 from utils.misc import calc_loss, node_type_to_prefix
 from utils.config import HeteroGraphConfig
@@ -50,7 +50,6 @@ if __name__ == '__main__':
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
     parser.add_argument("--test_num",                     type=int, default=-1,        help="number of testing")
     parser.add_argument("--use_gpu",          action="store_true",  default=False,     help="specify whether to use GPU")
-    parser.add_argument("--num_gpu",                      type=int, default=0,         help="specify which GPU to be used firstly")
     parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
     parser.add_argument("--neg_smp_strategy",             type=int, default=0,         help="the stratege of negative sampling")
     args = parser.parse_args()
@@ -95,10 +94,11 @@ if __name__ == '__main__':
         ).to(device)
 
     if args.train:
-        best_threshold_loggers = {
-            node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
-            for node_type in node_types if node_type != 'admission'
-        }
+        if not args.is_seq_pred:
+            best_threshold_loggers = {
+                node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
+                for node_type in node_types if node_type != 'admission'
+            }
 
         train_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -120,16 +120,17 @@ if __name__ == '__main__':
                 optimizer.step()  # optimizing
 
                 # log the best_threshold
-                if epoch == (args.epochs - 1):
+                if epoch == (args.epochs - 1) and not args.is_seq_pred:
                     for node_type, best_threshold_logger in best_threshold_loggers.items():
                         best_threshold_logger.log(dict_every_day_pred[node_type]["scores"],
                                                   dict_every_day_pred[node_type]["labels"])
 
                 t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss.item():.4f} \033[0m')
 
-        # save the best_threshold
-        for node_type, best_threshold_logger in best_threshold_loggers.items():
-            best_threshold_logger.save(prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
+        if not args.is_seq_pred:
+            # save the best_threshold
+            for node_type, best_threshold_logger in best_threshold_loggers.items():
+                best_threshold_logger.save(prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
 
         # save trained model
         model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
@@ -140,6 +141,7 @@ if __name__ == '__main__':
         test_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="test")
 
         if not args.train:
+            # TODO: auto load last checkpoint
             model_state_dict = torch.load(os.path.join(args.path_dir_model_hub, f"{args.test_model_state_dict}.pt"), map_location=device)
             model.load_state_dict(model_state_dict)
 
@@ -148,7 +150,10 @@ if __name__ == '__main__':
         for node_type in node_types:
             if node_type == 'admission':
                 continue
-            metrics_loggers[node_type] = Logger(max_timestep=args.max_timestep,
+            if args.is_seq_pred:
+                metrics_loggers[node_type] = SeqLogger(save_dir_path=resl_path, is_calc_ddi=(node_type == 'drug'))
+            else:
+                metrics_loggers[node_type] = Logger(max_timestep=args.max_timestep,
                                                 save_dir_path=resl_path,
                                                 best_thresholdspath=os.path.join(args.path_dir_thresholds, f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}_best_thresholds.pickle"),
                                                 is_calc_ddi=True if node_type == 'drug' else False)

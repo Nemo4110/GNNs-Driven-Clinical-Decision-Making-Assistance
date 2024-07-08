@@ -3,13 +3,15 @@ import pandas as pd
 import numpy as np
 import os
 import torch
+import torch.nn.functional as F
 import pickle
 
+from collections import defaultdict
 from tqdm import tqdm
+from torcheval.metrics import MulticlassAUPRC, MulticlassAUROC, MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score
 from sklearn.metrics import \
     auc, \
     roc_auc_score, \
-    roc_curve, \
     accuracy_score, \
     jaccard_score, \
     f1_score, \
@@ -19,6 +21,93 @@ from sklearn.metrics import \
 from utils.ddi import DDICalculator
 
 sys.path.append('..')
+
+
+def cal_jaccard(y_true: torch.tensor, y_pred: torch.tensor):
+    if y_true.numel() == 0 or y_pred.numel() == 0:
+        return 0
+    set1 = set(y_true)
+    set2 = set(y_pred)
+    a, b = len(set1 & set2), len(set1 | set2)
+    return a / b
+
+
+class SeqLogger:
+    def __init__(self, save_dir_path: str, is_calc_ddi: bool = False):
+        self.save_dir_path = save_dir_path
+        self.is_calc_ddi = is_calc_ddi
+
+        self.result = defaultdict(list)
+
+        if self.is_calc_ddi:
+            self.ddi_calculator = DDICalculator()
+
+    def log(self, scores, labels, *args):
+        """
+        Args:
+            scores: [T, B, X, H]
+            labels: [T, B, X]
+        """
+        self.calc_metrics_for_batch(scores, labels)
+
+    def calc_metrics_for_batch(self, scores: torch.tensor, labels: torch.tensor):
+        scores = scores.cpu().permute(1, 0, 2, 3)  # [B, T, X, H]
+        labels = labels.cpu().permute(1, 0, 2)  # [B, T, X]
+
+        for cur_adm_scr, cur_adm_lbl in zip(scores, labels):
+            # flatten
+            cur_adm_scr = cur_adm_scr.contiguous().view(-1, cur_adm_scr.size(-1))  # [T*X, H]
+            cur_adm_lbl = cur_adm_lbl.contiguous().view(-1)  # [T*X]
+
+            # filter out special tokens (PAD)
+            no_pad_indices = (cur_adm_lbl != cur_adm_scr.size(-1)).int()
+            cur_adm_scr = torch.index_select(cur_adm_scr, 0, no_pad_indices)
+            cur_adm_lbl = torch.index_select(cur_adm_lbl, 0, no_pad_indices)
+
+            # for solving: number of classes in y_true not equal to the number of columns in 'y_score' when calc rocauc
+            cur_adm_scr = cur_adm_scr[:, :-1]  # drop last dimension of PAD
+
+            cur_adm_scr = F.softmax(cur_adm_scr, dim=-1)
+            cur_adm_prd = torch.argmax(cur_adm_scr, dim=-1)  # TODO: beam search
+
+            auroc = MulticlassAUROC(num_classes=cur_adm_scr.size(-1))
+            auroc.update(cur_adm_scr, cur_adm_lbl)
+            self.result['rocauc'].append(auroc.compute().item())
+
+            auprc = MulticlassAUPRC(num_classes=cur_adm_scr.size(-1))
+            auprc.update(cur_adm_scr, cur_adm_lbl)
+            self.result['prauc'].append(auprc.compute().item())
+
+            accuracy = MulticlassAccuracy()
+            accuracy.update(cur_adm_prd, cur_adm_lbl)
+            self.result['accuracy'].append(accuracy.compute().item())
+
+            self.result['jaccard'].append(cal_jaccard(y_true=cur_adm_lbl, y_pred=cur_adm_prd))
+
+            precision = MulticlassPrecision(num_classes=cur_adm_scr.size(-1))
+            precision.update(cur_adm_prd, cur_adm_lbl)
+            self.result['precision'].append(precision.compute().item())
+
+            recall = MulticlassRecall(num_classes=cur_adm_scr.size(-1))
+            recall.update(cur_adm_prd, cur_adm_lbl)
+            self.result['recall'].append(recall.compute().item())
+
+            f1 = MulticlassF1Score(num_classes=cur_adm_scr.size(-1))
+            f1.update(cur_adm_prd, cur_adm_lbl)
+            self.result['f1'].append(f1.compute().item())
+
+            if self.is_calc_ddi:
+                self.result['ddi_pred'].append(self.ddi_calculator.calc_ddi_rate(cur_adm_prd.unique()))
+                self.result['ddi_true'].append(self.ddi_calculator.calc_ddi_rate(cur_adm_lbl.unique()))
+
+    def save(self, description):
+        result = {}
+        for metric, values in self.result.items():
+            result[f'{metric}_mean'] = np.array(values).mean()
+            result[f'{metric}_std'] = np.array(values).std()
+
+        with open(os.path.join(self.save_dir_path, f"{description}.pickle"), 'wb') as f:
+            pickle.dump(result, f)
 
 
 class Logger:
@@ -117,7 +206,7 @@ class Logger:
                 # iterate every hadm batches
                 for y_pred, y_true, edge_indices in tqdm(zip(preds_current_timestep, trues_current_timestep,
                                                              edge_indices_current_timestep), leave=False):
-                    y_pred_bool = y_pred > self.dict_best_threholds['each_timestep'][current_timestep]
+                    y_pred_bool = y_pred > self.dict_best_threholds['each_timestep'][timestep]
                     self.list_ddi_pred[timestep].extend(self.ddi_calculator.calc_ddis_for_batch_admi(y_pred_bool, edge_indices))
                     self.list_ddi_true[timestep].extend(self.ddi_calculator.calc_ddis_for_batch_admi(y_true,      edge_indices))
 
