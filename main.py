@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument("--lr",                           type=float, default=0.0003,               help="learning rate")
     parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation (without GNN)")
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="specify whether to only use GNN")
-    parser.add_argument("--is_seq_pred",      action="store_true",    default=False,                help="specify whether to enable seq pred")
+    parser.add_argument("--is_seq_pred",      action="store_true",    default=True,                 help="specify whether to enable seq pred")
 
     # Paths
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_HGS_OUTPUT, help="path where dataset directory locates")  # in linux
@@ -96,6 +96,8 @@ if __name__ == '__main__':
         ).to(device)
 
     if args.train:
+        model.train()
+
         if not args.is_seq_pred:
             best_threshold_loggers = {
                 node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
@@ -111,7 +113,9 @@ if __name__ == '__main__':
         # train
         # with torch.autograd.detect_anomaly():
         for epoch in tqdm(range(args.epochs)):
-            model.train()
+            if args.use_gpu:
+                torch.cuda.empty_cache()
+
             t_loop_train_set = tqdm(train_set, leave=False)
             for hg in t_loop_train_set:
                 hg = hg.to(device)
