@@ -78,14 +78,14 @@ class BackBone(nn.Module):
 
         # EMBD
         if self.is_seq_pred:
-            # +3 for SOS, EOS, PAD
+            # +1 for PAD
             self.module_dict_embedding = nn.ModuleDict({
-                node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type] + 3, self.hidden_dim) \
+                node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type] + 1, self.hidden_dim) \
                 for node_type in self.node_types if node_type != 'admission'
             })
 
             self.module_dict_ffc = nn.ModuleDict({
-                node_type: nn.Linear(self.hidden_dim, MappingManager.node_type_to_node_num[node_type] + 3)
+                node_type: nn.Linear(self.hidden_dim, MappingManager.node_type_to_node_num[node_type] + 1)
                 for node_type in self.node_types if node_type != 'admission'
             })
 

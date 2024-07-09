@@ -27,10 +27,9 @@ class SeqLabelConverter:
             mask = next_t_edge_index[0, :] == i
             curr_seq = next_t_edge_index[1, mask]
 
-            curr_seq = F.pad(curr_seq, pad=(1, 0), mode='constant', value=MappingManager.node_type_to_special_token[edge_type[-1]].SOS)
-            curr_seq = F.pad(curr_seq, pad=(0, 1), mode='constant', value=MappingManager.node_type_to_special_token[edge_type[-1]].EOS)
+            # PAD
             curr_seq = F.pad(curr_seq, pad=(0, max_seq_length - curr_seq.size(0)),
-                                                   mode='constant', value=MappingManager.node_type_to_special_token[edge_type[-1]].PAD)
+                                                   mode='constant', value=MappingManager.node_type_to_node_num[edge_type[-1]])
 
             label.append(curr_seq)
 
