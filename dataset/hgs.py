@@ -6,8 +6,10 @@ import torch_geometric.transforms as T
 
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.utils import negative_sampling
-
+from torch_geometric.loader import DataLoader
+from tqdm import tqdm
 from utils.config import MappingManager, max_seq_length
+from typing import List
 
 
 class SeqLabelConverter:
@@ -51,7 +53,17 @@ class DiscreteTimeHeteroGraph(Dataset):
 
     def get(self, idx):
         return torch.load(os.path.join(self.root_path, self.pt_files[idx]))
-    
+
+    @staticmethod
+    def pack_batch(hgs: List[HeteroData], max_timestep: int):
+        r"""
+        Args:
+            hgs:
+            max_timestep: how many sub graphs (days) to pack into a batch
+        """
+        loader = DataLoader(hgs, batch_size=max_timestep)
+        return next(iter(loader))
+
     @staticmethod
     def get_subgraph_by_timestep(hg: HeteroData, timestep: int, neg_smp_strategy: int=0):
         r"""
@@ -119,10 +131,12 @@ class DiscreteTimeHeteroGraph(Dataset):
 
 
 if __name__ == "__main__":
-    train_set = DiscreteTimeHeteroGraph(root_path=r".\batch_size_128", usage="train")
-    for hg in train_set:
-        sub_hg = DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, 3)
-        drug_seq_labels = sub_hg['admission', 'took', 'drug'].seq_labels
-        print(drug_seq_labels.shape)
-        print(drug_seq_labels[7])
-        break
+    dataset = DiscreteTimeHeteroGraph(root_path=r".\batch_size_128", usage="train")
+    hg = dataset[0]
+    max_timestep = 20
+    hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=0) for t in range(max_timestep)]
+    loader = DataLoader(hgs, batch_size=max_timestep)
+    batch_hg = next(iter(loader))
+    print(batch_hg)
+    # for k, v in batch_hg.collect('x').items():
+    #     print(k, v.shape)

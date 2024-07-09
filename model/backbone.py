@@ -12,36 +12,6 @@ from utils.misc import calc_loss
 from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode
 
 
-class MultiGnns(nn.Module):
-    def __init__(self,
-                 hidden_dim: int,
-                 max_timestep: int,
-                 gnn_type: str,
-                 node_types: List[str],
-                 edge_types: List[Tuple[str, str, str]],
-                 gnn_layer_num: int = 2,
-                 ):
-        super().__init__()
-
-        # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cpu and cuda:0!
-        # Solution: use the `nn.ModuleList` instead of list
-        self.gnns = nn.ModuleList([SingelGnn(hidden_dim=hidden_dim, gnn_type=gnn_type, gnn_layer_num=gnn_layer_num)
-                                   for _ in range(max_timestep)])  # as many fc as max_timestep
-
-        # !!! Warning: here must use `self.gnns[i]`, if we use `gnn` will cause failure of `to_hetero`,
-        #              because the `gnn` are temp parameter!
-        for i, gnn in enumerate(self.gnns):
-            self.gnns[i] = to_hetero(gnn, metadata=(node_types, edge_types))
-
-    def forward(self, list_dict_node_feats, list_edge_index_dict, list_dict_edge_attrs):
-        for i in range(len(self.gnns)):
-            list_dict_node_feats[i] = self.gnns[i](list_dict_node_feats[i],
-                                                   list_edge_index_dict[i],
-                                                   list_dict_edge_attrs[i])
-
-        return list_dict_node_feats
-
-
 class BackBone(nn.Module):
     def __init__(self,
                  max_timestep: int,
@@ -124,9 +94,8 @@ class BackBone(nn.Module):
 
         self.position_encoding = PositionalEncoding(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep)
 
-        self.gnns = MultiGnns(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep,
-                              gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num,
-                              node_types=self.node_types, edge_types=self.edge_types)
+        self.gnn = SingelGnn(hidden_dim=self.hidden_dim, gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num)
+        self.gnn = to_hetero(self.gnn, metadata=(self.node_types, self.edge_types))
 
         # DECODER
         self.module_dict_decoder = nn.ModuleDict({
@@ -142,42 +111,49 @@ class BackBone(nn.Module):
                 nn.init.xavier_normal_(weight)
 
     def forward(self, hg: HeteroData):
-        hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy) for t in range(self.max_timestep)]
+        num_adm = hg['admission'].node_id.size(0)
 
-        list_dict_node_feats = [{
-           node_type: self.module_dict_node_feat_proj[node_type](hg[node_type].x) + self.module_dict_embedding[node_type](hg[node_type].node_id) if node_type != 'admission' \
-                 else self.module_dict_node_feat_proj[node_type](hg[node_type].x) \
-            for node_type in self.node_types
-        } for hg in hgs]
-        list_edge_index_dict = [{
-            edge_type: edge_index \
-            for edge_type, edge_index in hg.edge_index_dict.items() if edge_type in self.edge_types
-        } for hg in hgs]
-        list_dict_edge_attrs = [{
-            edge_type: self.module_dict_edge_feat_proj["_".join(edge_type)](hg[edge_type].x)
-            for edge_type in self.edge_types
-        } for hg in hgs]
+        # EMB & PRJ
+        for node_type in self.node_types:
+            if node_type != 'admission':
+                hg[node_type].x = self.module_dict_node_feat_proj[node_type](hg[node_type].x.float()) + self.module_dict_embedding[node_type](hg[node_type].node_id)
+            else:
+                hg[node_type].x = self.module_dict_node_feat_proj[node_type](hg[node_type].x.float())
 
-        dict_node_feat_ori = {
-            node_type: torch.stack([dict_node_feats[node_type] for dict_node_feats in list_dict_node_feats])
-            for node_type in self.node_types
-        }
+        for edge_type in self.edge_types:
+            if 'rev' in edge_type[1]: continue
+            hg[edge_type].x = self.module_dict_edge_feat_proj["_".join(edge_type)](hg[edge_type].x.float())
 
-        # go through gnns
-        list_dict_node_feats = self.gnns(list_dict_node_feats, list_edge_index_dict, list_dict_edge_attrs)
+        hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy)
+               for t in range(self.max_timestep)]
 
-        dict_node_feat = {
-            node_type: torch.stack([dict_node_feats[node_type] for dict_node_feats in list_dict_node_feats]) \
-            for node_type in self.node_types
-        }
+        # pack to batch for mini-batch processing in time (days) axis
+        batch_hgs = DiscreteTimeHeteroGraph.pack_batch(hgs, self.max_timestep)
+
+        # go through gnn
+        x_collection = batch_hgs.collect('x')
+        node_feats_ori = {k: x for k, x in x_collection.items() if k in self.node_types}
+        edge_feats_ori = {k: x for k, x in x_collection.items() if k in self.edge_types}
+
+        # encoded node_feats, is a dict, every value has shape [T * B, H]
+        node_feats_enc = self.gnn(node_feats_ori, batch_hgs.edge_index_dict, edge_feats_ori)
+
+        # reshape (unpack)
+        for node_type in node_feats_enc.keys():
+            if node_type == 'admission':
+                node_feats_enc[node_type] = node_feats_enc[node_type].view(-1, num_adm, self.hidden_dim)  # [T, B, H]
+                node_feats_ori[node_type] = node_feats_ori[node_type].view(-1, num_adm, self.hidden_dim)  # [T, B, H]
+            else:
+                node_feats_enc[node_type] = node_feats_enc[node_type].view(-1, MappingManager.node_type_to_node_num[node_type], self.hidden_dim)
+                node_feats_ori[node_type] = node_feats_ori[node_type].view(-1, MappingManager.node_type_to_node_num[node_type], self.hidden_dim)
 
         # decode
+        node_feat_dec = {}
         if not self.is_gnn_only:
-            for node_type, node_feat in dict_node_feat.items():
-                node_feat_ori = dict_node_feat_ori[node_type][0].unsqueeze(0)
-                node_feat = self.position_encoding(node_feat)  # Add position encoding
-                dict_node_feat[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat, h_0=node_feat_ori)  # update
-                # [T, B, H]
+            for node_type, node_feat in node_feats_enc.items():
+                node_feat_ori = node_feats_ori[node_type][0].unsqueeze(0)
+                node_feat_pos = self.position_encoding(node_feat)
+                node_feat_dec[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat_pos, h_0=node_feat_ori)  # update
 
         dict_every_day_pred = {}
         for edge_type in self.edge_types:
@@ -187,7 +163,7 @@ class BackBone(nn.Module):
                 user_node_type = edge_type[0]
                 item_node_type = edge_type[-1]
                 if self.is_seq_pred:
-                    node_feat = dict_node_feat[user_node_type].unsqueeze(-2).repeat(1, 1, max_seq_length, 1)
+                    node_feat = node_feat_dec[user_node_type].unsqueeze(-2).repeat(1, 1, max_seq_length, 1)
                     batch_size = node_feat.size(1)
                     node_feat = self.module_dict_ffc[item_node_type](node_feat.view(-1, self.hidden_dim))
                     scores = node_feat.view(self.max_timestep, batch_size, max_seq_length, -1)
@@ -201,8 +177,8 @@ class BackBone(nn.Module):
                         "scores": [
                             # Link predicting:
                             self.module_dict_links_predictor[item_node_type](
-                                dict_node_feat[user_node_type][curr_timestep],
-                                dict_node_feat[item_node_type][curr_timestep],
+                                node_feat_dec[user_node_type][curr_timestep],
+                                node_feat_dec[item_node_type][curr_timestep],
                                 hg[edge_type].labels_index
                             ) for curr_timestep, hg in enumerate(hgs)
                         ],
