@@ -7,9 +7,6 @@ import torch_geometric.transforms as T
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.utils import negative_sampling
 from torch_geometric.loader import DataLoader
-from tqdm import tqdm
-from utils.config import MappingManager, max_seq_length
-from utils.constant import MASK
 from typing import List
 
 

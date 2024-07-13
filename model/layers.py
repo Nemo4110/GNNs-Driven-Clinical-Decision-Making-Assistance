@@ -136,6 +136,7 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         weights = torch.ones_like(label)
         weights = MaskedSoftmaxCELoss.sequence_mask(weights, valid_len)
         self.reduction = 'none'
+        # 这里必须permute(0, 2, 1)，见https://pytorch.org/docs/1.12/generated/torch.nn.CrossEntropyLoss.html
         unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(
             pred.permute(0, 2, 1), label)
         weighted_loss = (unweighted_loss * weights).mean(dim=1)
