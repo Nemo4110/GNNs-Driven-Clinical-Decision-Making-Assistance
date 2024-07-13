@@ -9,33 +9,8 @@ from torch_geometric.utils import negative_sampling
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 from utils.config import MappingManager, max_seq_length
+from utils.constant import MASK
 from typing import List
-
-
-class SeqLabelConverter:
-    r""" [B, X]
-
-    X is set to 160, as max length (of someday) of
-        - lab items: 119
-        - drug: 143
-    """
-    @staticmethod
-    def convert(sub_hg: HeteroData, edge_type, next_t_edge_index):
-        """
-        Note that `hg` here should not be converted to undirected graph by `T.ToUndirected()`
-        """
-        label = []
-        for i in sub_hg["admission"].node_id:  # iterating nodes (each patient)
-            mask = next_t_edge_index[0, :] == i
-            curr_seq = next_t_edge_index[1, mask]
-
-            # PAD
-            curr_seq = F.pad(curr_seq, pad=(0, max_seq_length - curr_seq.size(0)),
-                                                   mode='constant', value=MappingManager.node_type_to_node_num[edge_type[-1]])
-
-            label.append(curr_seq)
-
-        return torch.stack(label, dim=0)  # [B, X]
 
 
 class DiscreteTimeHeteroGraph(Dataset):
@@ -55,13 +30,13 @@ class DiscreteTimeHeteroGraph(Dataset):
         return torch.load(os.path.join(self.root_path, self.pt_files[idx]))
 
     @staticmethod
-    def pack_batch(hgs: List[HeteroData], max_timestep: int):
+    def pack_batch(hgs: List[HeteroData], batch_size: int):
         r"""
         Args:
             hgs:
-            max_timestep: how many sub graphs (days) to pack into a batch
+            batch_size: how many sub graphs (days) to pack into a batch
         """
-        loader = DataLoader(hgs, batch_size=max_timestep)
+        loader = DataLoader(hgs, batch_size=batch_size)
         return next(iter(loader))
 
     @staticmethod
@@ -120,8 +95,6 @@ class DiscreteTimeHeteroGraph(Dataset):
             sub_hg[edge_type].labels_index = sub_hg[edge_type].labels_index[:, index_shuffle]
             sub_hg[edge_type].labels = sub_hg[edge_type].labels[index_shuffle]
 
-            sub_hg[edge_type].seq_labels = SeqLabelConverter.convert(sub_hg, edge_type, next_t_edge_index=sub_hg[edge_type].pos_index)
-
         # We also need to make sure to add the reverse edges from labitems to admission
         # in order to let a GNN be able to pass messages in both directions.
         # We can leverage the `T.ToUndirected()` transform for this from PyG:
@@ -129,14 +102,50 @@ class DiscreteTimeHeteroGraph(Dataset):
 
         return sub_hg
 
+    @staticmethod
+    def split_by_day(hg: HeteroData):
+        hgs = []
+
+        last_lbe_day = hg["admission", "did", "labitem"].timestep.max().int().item()
+        last_pre_day = hg["admission", "took", "drug"].timestep.max().int().item()
+        adm_len = max(last_lbe_day, last_pre_day)
+
+        device = hg["admission", "did", "labitem"].timestep.device
+
+        for cur_day in range(adm_len + 1):
+            sub_hg = HeteroData()
+
+            # NODE (copied directly)
+            for node_type in hg.node_types:
+                sub_hg[node_type].node_id = hg[node_type].node_id.clone()
+                sub_hg[node_type].x = hg[node_type].x.clone().float()
+
+            # Edges
+            for edge_type in hg.edge_types:
+                mask = (hg[edge_type].timestep == cur_day).to(device)
+
+                edge_index = hg[edge_type].edge_index[:, mask]
+                ex = hg[edge_type].x[mask, :]
+
+                sub_hg[edge_type].edge_index = edge_index.clone()
+                sub_hg[edge_type].x = ex.clone().float()
+
+            sub_hg = T.ToUndirected()(sub_hg)
+
+            hgs.append(sub_hg)
+
+        return hgs
+
 
 if __name__ == "__main__":
-    dataset = DiscreteTimeHeteroGraph(root_path=r".\batch_size_128", usage="train")
-    hg = dataset[0]
-    max_timestep = 20
-    hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=0) for t in range(max_timestep)]
-    loader = DataLoader(hgs, batch_size=max_timestep)
-    batch_hg = next(iter(loader))
-    print(batch_hg)
+    pass
+    # dataset = DiscreteTimeHeteroGraph(root_path=r".\batch_size_128", usage="train")
+    # hg = dataset[0]
+    # max_timestep = 20
+
+    # hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=0) for t in range(max_timestep)]
+    # loader = DataLoader(hgs, batch_size=max_timestep)
+    # batch_hg = next(iter(loader))
+    # print(batch_hg)
     # for k, v in batch_hg.collect('x').items():
     #     print(k, v.shape)

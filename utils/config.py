@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List, Tuple, Dict
 
 
 @dataclass
@@ -47,6 +48,15 @@ class HeteroGraphConfig:
 
 
 max_seq_length = 150
+
+
+@dataclass
+class GNNConfig:
+    gnn_type: str
+    gnn_layer_num: int
+    node_types: List[str]
+    edge_types: List[Tuple[str, str, str]]
+    mapper = MappingManager()
 
 
 if __name__ == "__main__":

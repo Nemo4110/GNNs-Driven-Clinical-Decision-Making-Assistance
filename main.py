@@ -28,12 +28,12 @@ if __name__ == '__main__':
     #       would trigger the assert error "last timestep has not labels!"
     #       in `get_subgraph_by_timestep` (bigger max_timestep can be support in future)
     parser.add_argument("--max_timestep",                 type=int,   default=20,                   help="The maximum `TIMESTEP`")
-    parser.add_argument("--gnn_type",                                 default="GENConv",            help="Specify the `conv` that being used as MessagePassing")
-    parser.add_argument("--gnn_layer_num",                type=int,   default=2,                    help="Number of gnn layers")
-    parser.add_argument("--num_decoder_layers",           type=int,   default=6,                    help="Number of decoder layers")
-    parser.add_argument("--decoder_choice",                           default="TransformerDecoder", help="Decoder choice")
-    parser.add_argument("--hidden_dim",                   type=int,   default=32,                   help="hidden dimension")
-    parser.add_argument("--lr",                           type=float, default=0.0003,               help="learning rate")
+    parser.add_argument("--gnn_type",                                 default="GENConv")
+    parser.add_argument("--gnn_layer_num",                type=int,   default=2)
+    parser.add_argument("--num_decoder_layers",           type=int,   default=6)
+    parser.add_argument("--decoder_choice",                           default="TransformerDecoder")
+    parser.add_argument("--hidden_dim",                   type=int,   default=64)
+    parser.add_argument("--lr",                           type=float, default=0.0003)
     parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="specify whether to use sequntial recommendation (without GNN)")
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="specify whether to only use GNN")
     parser.add_argument("--is_seq_pred",      action="store_true",    default=True,                 help="specify whether to enable seq pred")
@@ -47,11 +47,11 @@ if __name__ == '__main__':
     # Experiment settings
     parser.add_argument("--task",                                   default="MIX",     help="Specify the goal of the recommended task, in ['MIX', 'drug', 'labitem']")
     parser.add_argument("--epochs",                       type=int, default=3)
-    parser.add_argument("--train",            action="store_true",  default=False,     help="specify whether do training")
-    parser.add_argument("--test",             action="store_true",  default=False,     help="specify whether do testing")
+    parser.add_argument("--train",            action="store_true",  default=False)
+    parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
     parser.add_argument("--test_num",                     type=int, default=-1,        help="number of testing")
-    parser.add_argument("--use_gpu",          action="store_true",  default=False,     help="specify whether to use GPU")
+    parser.add_argument("--use_gpu",          action="store_true",  default=False)
     parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
     parser.add_argument("--neg_smp_strategy",             type=int, default=0,         help="the stratege of negative sampling")
     args = parser.parse_args()
@@ -80,8 +80,7 @@ if __name__ == '__main__':
             decoder_choice=args.decoder_choice,
             num_decoder_layers=args.num_decoder_layers,
             hidden_dim=args.hidden_dim,
-            neg_smp_strategy=args.neg_smp_strategy,
-            is_seq_pred=args.is_seq_pred
+            neg_smp_strategy=args.neg_smp_strategy
         ).to(device)
     else:
         model: nn.Module = SeqRecommend(
