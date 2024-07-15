@@ -96,9 +96,10 @@ if __name__ == '__main__':
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
                 optimizer.step()
 
-                with torch.no_grad():
-                    num_tokens = d_valid_len.sum().item()
-                    metric.add(loss.sum().item(), num_tokens)
+                torch.cuda.synchronize()
+
+                num_tokens = d_valid_len.detach().sum().item()
+                metric.add(loss.detach().sum().item(), num_tokens)
 
                 t_loop.set_postfix_str(f'\033[32m loss: {metric[0] / metric[1]:.4f}/token on {str(device)} \033[0m')
 
