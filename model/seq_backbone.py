@@ -15,13 +15,14 @@ from model.layers import SingelGnn
 
 
 class SeqBackBone(nn.Module):
-    def __init__(self, h_dim: int, gnn_conf: GNNConfig):
+    def __init__(self, h_dim: int, gnn_conf: GNNConfig, device):
         """model for medications recommendation sequential predict task
         """
         super().__init__()
 
         self.h_dim = h_dim
         self.gnn_conf = gnn_conf
+        self.device = device
 
         self.node_types = self.gnn_conf.node_types
         self.edge_types = self.gnn_conf.edge_types
@@ -145,8 +146,8 @@ class SeqBackBone(nn.Module):
             patients_condition.append(node_feats_enc["admission"])  # 此时长度不一，需要PAD
 
         # PAD
-        patients_condition = pad_sequence(patients_condition, batch_first=True, padding_value=0)
-        padding_mask = sequence_mask(patients_condition, valid_len=torch.tensor(adm_lens))
+        patients_condition = pad_sequence(patients_condition, batch_first=True, padding_value=0).to(self.device)
+        padding_mask = sequence_mask(patients_condition, valid_len=torch.tensor(adm_lens, device=self.device))
 
         return patients_condition, padding_mask  # (B, T, h_dim), (B, T)
 

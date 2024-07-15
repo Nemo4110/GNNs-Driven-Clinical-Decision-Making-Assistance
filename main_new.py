@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-    model = SeqBackBone(h_dim=args.hidden_dim, gnn_conf=gnn_conf)
+    model = SeqBackBone(h_dim=args.hidden_dim, gnn_conf=gnn_conf, device=device).to(device)
 
     if args.train:
         model.train()
@@ -61,6 +61,10 @@ if __name__ == '__main__':
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                       collate_fn=collect_fn, pin_memory=True)
         for epoch in tqdm(range(args.epochs)):
+            # 清一下占用VRAM的临时变量
+            if args.use_gpu:
+                torch.cuda.empty_cache()
+
             t_loop = tqdm(train_dataloader, leave=False)
             metric = d2l.Accumulator(2)  # 训练损失总和，token数量
             for batch in t_loop:
