@@ -35,6 +35,9 @@ class SeqBackBone(nn.Module):
         self.d_SOS = self.med_vocab_size
         self.l_SOS = self.itm_vocab_size
 
+        self.d_EOS = self.med_vocab_size + 1
+        self.l_EOS = self.itm_vocab_size + 1
+
         # Embedding
         # + 3 for SOS, EOS, PAD
         self.d_emb = nn.Embedding(self.med_vocab_size + 3, self.h_dim, padding_idx=self.d_PAD)  # lab-items
@@ -94,8 +97,8 @@ class SeqBackBone(nn.Module):
         bos_mask = torch.full((B, max_adm_len-1, 1), False, device=batch_d.device, dtype=torch.bool)
 
         # 从第二天开始预测，[..., :-1] 将每天的序列往前偏移1位，以便和bos拼接（强制教学）
-        dec_input      = torch.cat((bos,           batch_d[:, 1:, :-1]), dim=-1)
-        dec_input_mask = torch.cat((bos_mask, batch_d_mask[:, 1:, :-1]), dim=-1)
+        dec_input      = torch.cat((bos,           batch_d[:, 1:, :-1].contiguous()), dim=-1)
+        dec_input_mask = torch.cat((bos_mask, batch_d_mask[:, 1:, :-1].contiguous()), dim=-1)
 
         dec_output = self.decode(dec_input, dec_input_mask, patients_condition)
 
@@ -109,6 +112,7 @@ class SeqBackBone(nn.Module):
         adm_lens = [len(hgs) for hgs in batch_hgs]
         max_adm_len = max(adm_lens)
 
+        # 将结点&边特征映射到同一的h_dim维度
         for hgs in batch_hgs:  # 每个患者
             for hg in hgs:  # 住院的每天
                 # node feature
@@ -200,10 +204,14 @@ class SeqBackBone(nn.Module):
 
         dec_input = self.d_emb(dec_input)  # (B, T, X, h_dim)
         dec_input_flat = dec_input.view(B * max_adm_len, d_max_num, -1)  # (B*T, X, h_dim)
-        dec_input_mask_flat = dec_input_mask.view(B * max_adm_len, d_max_num)  # (B*T, X)
+
+        if dec_input_mask is not None:
+            dec_input_mask_flat = dec_input_mask.view(B * max_adm_len, d_max_num)  # (B*T, X)
+        else:
+            dec_input_mask_flat = None
 
         # 防止当前位置看到之后位置的信息
-        dec_input_sequence_mask = nn.Transformer.generate_square_subsequent_mask(dec_input_mask_flat.size(1))
+        dec_input_sequence_mask = nn.Transformer.generate_square_subsequent_mask(dec_input_flat.size(1))
         dec_input_sequence_mask = dec_input_sequence_mask.to(dec_input.device)  # same device
 
         # 来自encoder的输出，作为memory

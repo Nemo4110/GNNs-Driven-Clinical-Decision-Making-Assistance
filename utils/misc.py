@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+import os
+import glob
 
 from typing import List, Dict, Tuple
 
@@ -32,3 +34,23 @@ node_type_to_prefix = {
     'labitem':"ITEMS",
     'drug': "DRUGS"
 }
+
+
+def get_latest_model_ckpt(folder_path):
+    # 获取指定文件夹下的所有.pt文件路径
+    files = glob.glob(os.path.join(folder_path, '*.pt'))
+
+    # 如果文件夹为空，返回 None
+    if not files:
+        return None
+
+        # 找到最新的文件
+    latest_file = max(files, key=os.path.getmtime)
+
+    # 返回最新文件的文件名
+    return os.path.basename(latest_file)
+
+
+if __name__ == "__main__":
+    latest_model_ckpt = get_latest_model_ckpt(r"..\model\hub")
+    print(latest_model_ckpt)

@@ -75,6 +75,9 @@ def collect_fn(batch):
     batch_l_mask = torch.full((B, max_adm_len, l_max_num), True, dtype=torch.bool)
     batch_d_mask = torch.full((B, max_adm_len, d_max_num), True, dtype=torch.bool)
 
+    T_batch_l_lens = torch.full((B, max_adm_len), 0)
+    T_batch_d_lens = torch.full((B, max_adm_len), 0)
+
     for i in range(B):  # adm
         for j in range(adm_lens[i]):  # day
             batch_l[i, j, :batch_l_lens[i][j]] = batch_l_seq[i][j]
@@ -83,9 +86,12 @@ def collect_fn(batch):
             batch_l_mask[i, j, :batch_l_lens[i][j]] = False
             batch_d_mask[i, j, :batch_d_lens[i][j]] = False
 
+            T_batch_l_lens[i, j] = batch_l_lens[i][j]
+            T_batch_d_lens[i, j] = batch_d_lens[i][j]
+
     return batch_hgs, \
-        batch_l, batch_l_mask, batch_l_lens, \
-        batch_d, batch_d_mask, batch_d_lens
+        batch_l, batch_l_mask, T_batch_l_lens, \
+        batch_d, batch_d_mask, T_batch_d_lens
 
 
 if __name__ == "__main__":

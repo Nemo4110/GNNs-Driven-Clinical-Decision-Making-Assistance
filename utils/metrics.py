@@ -3,12 +3,9 @@ import pandas as pd
 import numpy as np
 import os
 import torch
-import torch.nn.functional as F
 import pickle
 
-from collections import defaultdict
 from tqdm import tqdm
-from torcheval.metrics import MulticlassAUPRC, MulticlassAUROC, MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score
 from sklearn.metrics import \
     auc, \
     roc_auc_score, \
@@ -17,10 +14,33 @@ from sklearn.metrics import \
     f1_score, \
     precision_score, \
     recall_score, \
-    precision_recall_curve
+    precision_recall_curve, \
+    average_precision_score
 from utils.ddi import DDICalculator
+from typing import List
 
 sys.path.append('..')
+ddi_calculator = DDICalculator()
+
+
+def flat_indices_to_voc_size(indices: List[int], voc_size, exclude_indices=None) -> np.ndarray:
+    if exclude_indices is not None:
+        indices = [elm for elm in indices if elm not in exclude_indices]
+
+    tmp = np.zeros(voc_size)
+    tmp[indices] = 1
+
+    return tmp
+
+
+def flat_probs(probs: List[torch.tensor], preds: List[int]):
+    tmp = [prob[:-3] for prob in probs]  # 去掉SOS, EOS, PAD
+    # TODO: 检查这里np.max后，是否得到正确形状
+    tmp = np.max(tmp, axis=0)  # 对于没预测的药物，取每个位置上最大的概率，否则直接取对应的概率
+    for i, pred in enumerate(preds):
+        tmp[pred] = probs[i][pred]
+
+    return tmp
 
 
 def cal_jaccard(y_true: torch.tensor, y_pred: torch.tensor):
@@ -32,92 +52,84 @@ def cal_jaccard(y_true: torch.tensor, y_pred: torch.tensor):
     return a / b
 
 
-class SeqLogger:
-    def __init__(self, save_dir_path: str, is_calc_ddi: bool = False):
-        self.save_dir_path = save_dir_path
-        self.is_calc_ddi = is_calc_ddi
+def rocauc(cur_day_preds, cur_day_probs, cur_day_labels):
+    try:
+        return roc_auc_score(cur_day_labels, cur_day_probs, average='macro')
+    except ValueError:
+        return 0
 
-        self.result = defaultdict(list)
 
-        if self.is_calc_ddi:
-            self.ddi_calculator = DDICalculator()
+def accuracy(cur_day_preds, cur_day_probs, cur_day_labels):
+    return accuracy_score(cur_day_labels, cur_day_preds)
 
-    def log(self, scores, labels, *args):
-        """
-        Args:
-            scores: [T, B, X, H]
-            labels: [T, B, X]
-        """
-        self.calc_metrics_for_batch(scores, labels)
 
-    def calc_metrics_for_batch(self, scores: torch.tensor, labels: torch.tensor):
-        scores = scores.cpu().permute(1, 0, 2, 3).contiguous()  # [B, T, X, H]
-        labels = labels.cpu().permute(1, 0, 2).contiguous()  # [B, T, X]
+def jaccard(cur_day_preds, cur_day_probs, cur_day_labels):
+    target = np.where(cur_day_labels == 1)
+    inter = set(cur_day_preds) & set(target)
+    union = set(cur_day_preds) | set(target)
+    score = 0 if union == 0 else len(inter) / len(union)
 
-        t_loop = tqdm(zip(scores, labels), total=scores.size(0), leave=False)
-        for cur_adm_scr, cur_adm_lbl in t_loop:
-            # flatten
-            cur_adm_scr = cur_adm_scr.view(-1, cur_adm_scr.size(-1))  # [T*X, H]
-            cur_adm_lbl = cur_adm_lbl.view(-1)  # [T*X]
+    return score
 
-            # filter out special tokens (PAD)
-            no_pad_indices = (cur_adm_lbl != (cur_adm_scr.size(-1) - 1))
-            no_pad_indices = torch.nonzero(no_pad_indices).flatten()
 
-            cur_adm_scr = torch.index_select(cur_adm_scr, 0, no_pad_indices)
-            cur_adm_lbl = torch.index_select(cur_adm_lbl, 0, no_pad_indices)
+def prauc(cur_day_preds, cur_day_probs, cur_day_labels):
+    return average_precision_score(cur_day_labels, cur_day_probs, average='macro')
 
-            cur_adm_prd = torch.argmax(F.softmax(cur_adm_scr, dim=-1), dim=-1)  # TODO: beam search
 
-            auroc = MulticlassAUROC(num_classes=cur_adm_scr.size(-1))
-            auroc.update(cur_adm_scr, cur_adm_lbl)
-            rocauc = auroc.compute().item()
-            self.result['rocauc'].append(rocauc)
+def precision(cur_day_preds, cur_day_probs, cur_day_labels):
+    target = np.where(cur_day_labels == 1)
+    inter = set(cur_day_preds) & set(target)
+    score = 0 if len(cur_day_preds) == 0 else len(inter) / len(cur_day_preds)
 
-            auprc = MulticlassAUPRC(num_classes=cur_adm_scr.size(-1))
-            auprc.update(cur_adm_scr, cur_adm_lbl)
-            prauc = auprc.compute().item()
-            self.result['prauc'].append(prauc)
+    return score
 
-            accuracy = MulticlassAccuracy()
-            accuracy.update(cur_adm_prd, cur_adm_lbl)
-            acc = accuracy.compute().item()
-            self.result['accuracy'].append(acc)
 
-            self.result['jaccard'].append(cal_jaccard(y_true=cur_adm_lbl, y_pred=cur_adm_prd))
+def recall(cur_day_preds, cur_day_probs, cur_day_labels):
+    target = np.where(cur_day_labels == 1)
+    inter = set(cur_day_preds) & set(target)
+    score = 0 if len(target) == 0 else len(inter) / len(target)
 
-            precision = MulticlassPrecision(num_classes=cur_adm_scr.size(-1))
-            precision.update(cur_adm_prd, cur_adm_lbl)
-            prc = precision.compute().item()
-            self.result['precision'].append(prc)
+    return score
 
-            recall = MulticlassRecall(num_classes=cur_adm_scr.size(-1))
-            recall.update(cur_adm_prd, cur_adm_lbl)
-            rec = recall.compute().item()
-            self.result['recall'].append(rec)
 
-            f1 = MulticlassF1Score(num_classes=cur_adm_scr.size(-1))
-            f1.update(cur_adm_prd, cur_adm_lbl)
-            f1_s = f1.compute().item()
-            self.result['f1'].append(f1_s)
+def ddi_trues(cur_day_preds, cur_day_probs, cur_day_labels):
+    return ddi_calculator.calc_ddi_rate(np.nonzero(cur_day_labels))
 
-            if self.is_calc_ddi:
-                ddi_pd = self.ddi_calculator.calc_ddi_rate(cur_adm_prd.unique())
-                ddi_gt = self.ddi_calculator.calc_ddi_rate(cur_adm_lbl.unique())
-                self.result['ddi_pred'].append(ddi_pd)
-                self.result['ddi_true'].append(ddi_gt)
-                t_loop.set_postfix_str(f'\033[32m auc:{rocauc:.4f}, acc:{acc:.4f}, f1:{f1_s:.4f}, ddi-> pd:{ddi_pd:.4f}, gt:{ddi_gt:.4f} \033[0m')
-            else:
-                t_loop.set_postfix_str(f'\033[32m auc:{rocauc:.4f}, acc:{acc:.4f}, f1:{f1_s:.4f} \033[0m')
 
-    def save(self, description):
-        result = {}
-        for metric, values in self.result.items():
-            result[f'{metric}_mean'] = np.array(values).mean()
-            result[f'{metric}_std'] = np.array(values).std()
+def ddi_preds(cur_day_preds, cur_day_probs, cur_day_labels):
+    return ddi_calculator.calc_ddi_rate(np.nonzero(cur_day_preds))
 
-        with open(os.path.join(self.save_dir_path, f"{description}.pickle"), 'wb') as f:
-            pickle.dump(result, f)
+
+def calc_metrics_for_curr_adm(
+        idx, all_day_preds, all_day_probs, all_day_labels,
+        metric_functions=(rocauc, prauc, accuracy, jaccard, precision, recall, ddi_preds, ddi_trues)
+    ):
+    """
+    以df的形式，记录患者在这次住院的每天的各项指标;
+    方便后续进行细致的结果数据分析
+    """
+    d_voc_size = all_day_probs[0][0].size(-1) - 3  # 去掉SOS, EOS, PAD
+
+    SOS = d_voc_size
+    EOS = d_voc_size + 1
+    PAD = d_voc_size + 2
+
+    all_day_probs  = [flat_probs(cur_day_probs, cur_day_preds) for cur_day_probs, cur_day_preds in zip(all_day_probs, all_day_preds)]
+    all_day_preds  = [flat_indices_to_voc_size(cur_day_preds,  d_voc_size, [SOS, EOS, PAD]) for cur_day_preds  in all_day_preds]
+    all_day_labels = [flat_indices_to_voc_size(cur_day_labels, d_voc_size, [SOS, EOS, PAD]) for cur_day_labels in all_day_labels]
+
+    # TODO: 对每个mf跑些单元测试
+    result = pd.DataFrame(columns=['day'] + [mf.__name__ for mf in metric_functions])
+
+    for cur_day, (cur_day_preds, cur_day_probs, cur_day_labels) in enumerate(
+              zip(all_day_preds, all_day_probs, all_day_labels)):
+        # 新增一行（天的）指标结果
+        result.loc[len(result)] = [idx, cur_day] + [mf(cur_day_preds, cur_day_probs, cur_day_labels) for mf in metric_functions]
+
+    # TODO: 用precision, recall这两列计算每天的f1
+    # result['f1'] =   # use `apply()` ?
+
+    return result
 
 
 class Logger:
