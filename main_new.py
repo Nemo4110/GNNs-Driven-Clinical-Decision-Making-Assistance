@@ -61,13 +61,13 @@ if __name__ == '__main__':
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                       collate_fn=collect_fn, pin_memory=True)
         for epoch in tqdm(range(args.epochs)):
-            # 清一下占用VRAM的临时变量
-            if args.use_gpu:
-                torch.cuda.empty_cache()
-
+            metric = d2l.Accumulator(3)  # 训练损失总和，token数量, iter次数
             t_loop = tqdm(train_dataloader, leave=False)
-            metric = d2l.Accumulator(2)  # 训练损失总和，token数量
             for batch in t_loop:
+                # 清一下占用VRAM的临时变量
+                if args.use_gpu and metric[2] % 100 == 0:
+                    torch.cuda.empty_cache()
+
                 batch_hgs, \
                     batch_l, batch_l_mask, batch_l_lens, \
                     batch_d, batch_d_mask, batch_d_lens = batch
@@ -98,14 +98,15 @@ if __name__ == '__main__':
 
                 torch.cuda.synchronize()
 
-                num_tokens = d_valid_len.detach().sum().item()
-                metric.add(loss.detach().sum().item(), num_tokens)
+                with torch.no_grad():
+                    num_tokens = d_valid_len.detach().sum().item()
+                    metric.add(loss.detach().sum().item(), num_tokens, 1)
 
                 t_loop.set_postfix_str(f'\033[32m loss: {metric[0] / metric[1]:.4f}/token on {str(device)} \033[0m')
 
         # save model parameters
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub,
-                                                    f"loss_{metric[0] / metric[1]:.4f}_{model.__class__.__name__}"))
+                                                    f"loss_{metric[0] / metric[1]:.4f}_{model.__class__.__name__}.pt"))
 
     if args.test:
         test_dataset = OneAdmOneHetero(args.root_path_dataset, "test")
@@ -114,7 +115,9 @@ if __name__ == '__main__':
         if not args.train:
             # auto load latest save model from hub
             if not args.model_ckpt:
-                sd_path = os.path.join(args.path_dir_model_hub, f"{get_latest_model_ckpt(args.path_dir_model_hub)}")
+                latest_model_ckpt = get_latest_model_ckpt(args.path_dir_model_hub)
+                print(f"auto using latest ckpt: {latest_model_ckpt}")
+                sd_path = os.path.join(args.path_dir_model_hub, f"{latest_model_ckpt}")
             else:
                 sd_path = os.path.join(args.path_dir_model_hub, f"{args.model_ckpt}")
             sd = torch.load(sd_path, map_location=device)
@@ -145,13 +148,18 @@ if __name__ == '__main__':
                 all_day_preds: List[List[int]] = []
                 all_day_probs: List[List[torch.tensor]] = []
                 all_day_labels: List[List[int]] = []
+                all_day = []  # 记录哪些天有东西（有意义）
                 for cur_day in tqdm(range(1, max_adm_len), leave=False):  # 从第二天开始预测[1, max_adm_len)
                     # 构建当天的起始<bos> / SOS
                     dec_input = torch.full((1, 1, 1), model.d_SOS, device=device, dtype=torch.int32)
-                    cur_condition = patients_condition[:, cur_day, :].unsqueeze(1)  # (1, h_dim) -> (1, 1, h_dim)
+                    cur_condition = patients_condition[:, cur_day - 1, :].unsqueeze(1)  # (1, h_dim) -> (1, 1, h_dim)
 
                     cur_day_d_length = batch_d_lens[0, cur_day].int().item()
                     cur_day_labels = batch_d[0, cur_day, :cur_day_d_length].tolist()
+
+                    # 若这天的label没东西，则计算这天的metrics没有意义，直接跳过
+                    if len(cur_day_labels) == 1 and cur_day_labels[-1] == model.d_EOS:
+                        continue
 
                     cur_day_preds = []
                     cur_day_probs = []
@@ -166,18 +174,18 @@ if __name__ == '__main__':
                         # update 下一次的输入
                         dec_input = torch.cat([dec_input, pred], dim=-1)
 
-                        if pred.view(-1).item() == model.d_EOS:
-                            break
-
                         cur_day_preds.append(pred.view(-1).item())
                         cur_day_probs.append(prob.view(-1))  # TODO: 这里的probs应为softmax之后的logits？还是原始的logits？
+
+                        if pred.view(-1).item() == model.d_EOS:
+                            break
 
                     all_day_preds.append(cur_day_preds)
                     all_day_probs.append(cur_day_probs)
                     all_day_labels.append(cur_day_labels)
+                    all_day.append(cur_day)
 
-                # TODO: calculate metrics for current admission
-                result_cur_adm = calc_metrics_for_curr_adm(idx, all_day_preds, all_day_probs, all_day_labels)
+                result_cur_adm = calc_metrics_for_curr_adm(idx, all_day, all_day_preds, all_day_probs, all_day_labels)
                 results.append(result_cur_adm)
 
             results: pd.DataFrame = pd.concat(results)

@@ -34,11 +34,12 @@ def flat_indices_to_voc_size(indices: List[int], voc_size, exclude_indices=None)
 
 
 def flat_probs(probs: List[torch.tensor], preds: List[int]):
-    tmp = [prob[:-3] for prob in probs]  # 去掉SOS, EOS, PAD
-    # TODO: 检查这里np.max后，是否得到正确形状
-    tmp = np.max(tmp, axis=0)  # 对于没预测的药物，取每个位置上最大的概率，否则直接取对应的概率
+    tmp = torch.stack([prob[:-3] for prob in probs], dim=0)  # 去掉SOS, EOS, PAD
+    tmp = torch.max(tmp, dim=0).values
+    # tmp = np.max(tmp, axis=0)  # 对于没预测的药物，取每个位置上最大的概率，否则直接取对应的概率
     for i, pred in enumerate(preds):
-        tmp[pred] = probs[i][pred]
+        if pred < tmp.size(0):  # 去掉SOS, EOS, PAD
+            tmp[pred] = probs[i][pred]
 
     return tmp
 
@@ -64,10 +65,12 @@ def accuracy(cur_day_preds, cur_day_probs, cur_day_labels):
 
 
 def jaccard(cur_day_preds, cur_day_probs, cur_day_labels):
-    target = np.where(cur_day_labels == 1)
-    inter = set(cur_day_preds) & set(target)
-    union = set(cur_day_preds) | set(target)
-    score = 0 if union == 0 else len(inter) / len(union)
+    target = np.where(cur_day_labels == 1)[0]
+    preds  = np.where(cur_day_preds  == 1)[0]
+
+    inter = set(preds) & set(target)
+    union = set(preds) | set(target)
+    score = 0 if len(union) == 0 else len(inter) / len(union)
 
     return score
 
@@ -77,31 +80,43 @@ def prauc(cur_day_preds, cur_day_probs, cur_day_labels):
 
 
 def precision(cur_day_preds, cur_day_probs, cur_day_labels):
-    target = np.where(cur_day_labels == 1)
-    inter = set(cur_day_preds) & set(target)
-    score = 0 if len(cur_day_preds) == 0 else len(inter) / len(cur_day_preds)
+    target = np.where(cur_day_labels == 1)[0]
+    preds  = np.where(cur_day_preds  == 1)[0]
+    inter = set(preds) & set(target)
+    score = 0 if len(preds) == 0 else len(inter) / len(preds)
 
     return score
 
 
 def recall(cur_day_preds, cur_day_probs, cur_day_labels):
-    target = np.where(cur_day_labels == 1)
-    inter = set(cur_day_preds) & set(target)
+    target = np.where(cur_day_labels == 1)[0]
+    preds  = np.where(cur_day_preds  == 1)[0]
+    inter = set(preds) & set(target)
     score = 0 if len(target) == 0 else len(inter) / len(target)
 
     return score
 
 
+def calculate_f1(row):
+    prc = row['precision']
+    rec = row['recall']
+    if prc + rec == 0:
+        return 0.0
+    return 2 * (prc * rec) / (prc + rec)
+
+
 def ddi_trues(cur_day_preds, cur_day_probs, cur_day_labels):
-    return ddi_calculator.calc_ddi_rate(np.nonzero(cur_day_labels))
+    labels = np.nonzero(cur_day_labels)[0]
+    return ddi_calculator.calc_ddi_rate(labels)
 
 
 def ddi_preds(cur_day_preds, cur_day_probs, cur_day_labels):
-    return ddi_calculator.calc_ddi_rate(np.nonzero(cur_day_preds))
+    preds = np.nonzero(cur_day_preds)[0]
+    return ddi_calculator.calc_ddi_rate(preds)
 
 
 def calc_metrics_for_curr_adm(
-        idx, all_day_preds, all_day_probs, all_day_labels,
+        idx, all_day, all_day_preds, all_day_probs, all_day_labels,
         metric_functions=(rocauc, prauc, accuracy, jaccard, precision, recall, ddi_preds, ddi_trues)
     ):
     """
@@ -114,20 +129,23 @@ def calc_metrics_for_curr_adm(
     EOS = d_voc_size + 1
     PAD = d_voc_size + 2
 
-    all_day_probs  = [flat_probs(cur_day_probs, cur_day_preds) for cur_day_probs, cur_day_preds in zip(all_day_probs, all_day_preds)]
+    all_day_probs  = [
+        flat_probs(cur_day_probs, cur_day_preds)
+        for cur_day_probs, cur_day_preds in zip(all_day_probs, all_day_preds)
+        if len(cur_day_probs) > 0 and len(cur_day_preds) > 0
+    ]
     all_day_preds  = [flat_indices_to_voc_size(cur_day_preds,  d_voc_size, [SOS, EOS, PAD]) for cur_day_preds  in all_day_preds]
     all_day_labels = [flat_indices_to_voc_size(cur_day_labels, d_voc_size, [SOS, EOS, PAD]) for cur_day_labels in all_day_labels]
 
-    # TODO: 对每个mf跑些单元测试
-    result = pd.DataFrame(columns=['day'] + [mf.__name__ for mf in metric_functions])
+    result = pd.DataFrame(columns=['id', 'day'] + [mf.__name__ for mf in metric_functions])
 
-    for cur_day, (cur_day_preds, cur_day_probs, cur_day_labels) in enumerate(
-              zip(all_day_preds, all_day_probs, all_day_labels)):
+    for cur_day, cur_day_preds, cur_day_probs, cur_day_labels in \
+    zip(all_day, all_day_preds, all_day_probs, all_day_labels):
         # 新增一行（天的）指标结果
         result.loc[len(result)] = [idx, cur_day] + [mf(cur_day_preds, cur_day_probs, cur_day_labels) for mf in metric_functions]
 
     # TODO: 用precision, recall这两列计算每天的f1
-    # result['f1'] =   # use `apply()` ?
+    result['f1'] = result.apply(calculate_f1, axis=1)
 
     return result
 

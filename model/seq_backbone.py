@@ -200,7 +200,6 @@ class SeqBackBone(nn.Module):
         测试时（此时B=1）：
             一开始的dec_input，是一个形状（1，T，1）的全BOS tensor，
         """
-
         B, max_adm_len, d_max_num = dec_input.size()
 
         dec_input = self.d_emb(dec_input)  # (B, T, X, h_dim)
