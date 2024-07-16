@@ -15,7 +15,7 @@ from model.layers import SingelGnn
 
 
 class SeqBackBone(nn.Module):
-    def __init__(self, h_dim: int, gnn_conf: GNNConfig, device):
+    def __init__(self, h_dim: int, gnn_conf: GNNConfig, device, num_decoder_layers=6):
         """model for medications recommendation sequential predict task
         """
         super().__init__()
@@ -41,8 +41,8 @@ class SeqBackBone(nn.Module):
 
         # Embedding
         # + 3 for SOS, EOS, PAD
-        self.d_emb = nn.Embedding(self.med_vocab_size + 3, self.h_dim, padding_idx=self.d_PAD)  # lab-items
-        self.l_emb = nn.Embedding(self.itm_vocab_size + 3, self.h_dim, padding_idx=self.l_PAD)  # drugs / medications
+        self.d_emb = nn.Embedding(self.med_vocab_size + 3, self.h_dim)  # lab-items
+        self.l_emb = nn.Embedding(self.itm_vocab_size + 3, self.h_dim)  # drugs / medications
         self.nid_emb = nn.ModuleDict({
             'labitem': self.l_emb,
             'drug': self.d_emb
@@ -62,18 +62,18 @@ class SeqBackBone(nn.Module):
 
         # --- Encode ---
         self.patient_condition_encoder = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)
-
         self.gnn = SingelGnn(hidden_dim=self.h_dim,
                              gnn_type=self.gnn_conf.gnn_type, gnn_layer_num=self.gnn_conf.gnn_layer_num)
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
-
-        self.l_encoder = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)  # 为方便，暂设nhead=1
-        self.d_encoder = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)
+        # self.l_encoder = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)
+        # self.d_encoder = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)
         # some cross-seq attention encoder? NO. cross-seq info agg is done by gnn
 
         # --- Decode ---
-        self.d_decoder = nn.TransformerDecoderLayer(d_model=self.h_dim, nhead=1, batch_first=True)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=self.h_dim, nhead=8, batch_first=True)
+        self.d_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers)
 
+        # --- predict head ---
         self.d_proj = nn.Linear(self.h_dim, self.med_vocab_size, bias=False)
         self.d_proj.weight = self.d_emb.weight  # weight sharing
 
@@ -155,7 +155,7 @@ class SeqBackBone(nn.Module):
         # batch_l, batch_l_mask, batch_l_lens,
         # batch_d, batch_d_mask, batch_d_lens):
 
-        # TODO: 消融实验用——不使用GNN，使用药物、检验项目序列seq建模患者病情表示
+        # TODO: 消融实验? 用不使用GNN，使用药物、检验项目序列seq建模患者病情表示
         # B, max_adm_len, l_max_num = batch_l.size()
         # B, max_adm_len, d_max_num = batch_d.size()
         #

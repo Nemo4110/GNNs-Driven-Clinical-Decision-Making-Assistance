@@ -42,15 +42,15 @@ if __name__ == '__main__':
     parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--model_ckpt",                             default=None,      help="the .pt filename where stores the state_dict of model")
     parser.add_argument("--use_gpu",          action="store_true",  default=False)
-    parser.add_argument("--batch_size",                   type=int, default=16)
+    parser.add_argument("--batch_size",                   type=int, default=8)
 
     args = parser.parse_args()
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-    model = SeqBackBone(h_dim=args.hidden_dim, gnn_conf=gnn_conf, device=device).to(device)
+    model = SeqBackBone(h_dim=args.hidden_dim, gnn_conf=gnn_conf,
+                        device=device, num_decoder_layers=args.num_decoder_layers).to(device)
 
     if args.train:
         model.train()
