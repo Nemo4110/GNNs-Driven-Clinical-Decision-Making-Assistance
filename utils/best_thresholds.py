@@ -63,6 +63,8 @@ class BestThresholdLoggerV2:
                 cur_day = j + 1  # 因为从第二天（idx=1）开始预测
                 cur_day_pred = logits[i, j]
                 cur_day_true = labels[i, j]
+                if cur_day_true.sum() == 0:  # 若这天没有正样本，则跳过
+                    continue
                 fpr, tpr, thresholds = roc_curve(cur_day_true, cur_day_pred)
                 cur_day_best_th = thresholds[np.argmax(tpr - fpr)]
                 self.best_thresholds_by_days[cur_day].append(cur_day_best_th)
