@@ -158,7 +158,7 @@ class MaskedBCEWithLogitsLoss(nn.BCEWithLogitsLoss):
         weights = MaskedBCEWithLogitsLoss.mask_pad_adm(weights, adm_lens)
         self.reduction = 'none'
         unweighted_loss = super(MaskedBCEWithLogitsLoss, self).forward(pred, label)
-        weighted_loss = (unweighted_loss * weights).mean(dim=-1)
+        weighted_loss = (unweighted_loss * weights).mean(dim=1)
         return weighted_loss
 
     @staticmethod
@@ -179,5 +179,5 @@ if __name__ == "__main__":
     label = torch.randint(0, 1, (2, 3, 4)).float()
     adm_lens = torch.tensor([1, 3])
     loss_f = MaskedBCEWithLogitsLoss()
-    loss = loss_f(pred, label, adm_lens)
+    loss = loss_f(pred, label, adm_lens).sum(-1).mean()
 

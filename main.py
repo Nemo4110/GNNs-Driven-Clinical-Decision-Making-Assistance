@@ -33,7 +33,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_decoder_layers",           type=int,   default=6)
     parser.add_argument("--num_encoder_layers",           type=int,   default=6)
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder")
-    parser.add_argument("--hidden_dim",                   type=int,   default=64)
+    parser.add_argument("--hidden_dim",                   type=int,   default=256)
     parser.add_argument("--lr",                           type=float, default=0.0003)
     parser.add_argument("--use_seq_rec",      action="store_true",    default=False,                help="whether to use sequntial recommendation (without GNN)")
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="whether to only use GNN")
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     parser.add_argument("--test_num",                     type=int, default=-1,        help="number of testing")
 
     parser.add_argument("--use_gpu",          action="store_true",  default=False)
-    parser.add_argument("--batch_size",                   type=int, default=16)
+    parser.add_argument("--batch_size",                   type=int, default=32)
 
     args = parser.parse_args()
 
@@ -116,7 +116,7 @@ if __name__ == '__main__':
                     # TODO: at last epoch, log the best_threshold
                     if epoch == (args.epochs - 1):
                         bth_logger.log_cur_batch(logits, labels, can_prd_days)
-                t_loop.set_postfix_str(f'\033[32m loss: {loss.sum().item():.4f} on {str(device)} \033[0m')
+                t_loop.set_postfix_str(f'\033[32m loss: {loss.sum(-1).mean().item():.4f} on {str(device)} \033[0m')
 
         # train done
         bth_logger.save()
@@ -125,7 +125,7 @@ if __name__ == '__main__':
         if not os.path.exists(args.path_dir_model_hub):
             os.mkdir(args.path_dir_model_hub)
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub,
-                                                    f"loss_{loss.sum().item():.4f}_{model.__class__.__name__}.pt"))
+                                                    f"loss_{loss.sum(-1).mean().item():.4f}_{model.__class__.__name__}.pt"))
 
     # --- test ---
     if args.test:
