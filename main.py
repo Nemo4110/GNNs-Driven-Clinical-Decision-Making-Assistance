@@ -1,18 +1,22 @@
 import argparse
 import os
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import utils.constant as constant
 
 from tqdm import tqdm
-from dataset.hgs import DiscreteTimeHeteroGraph
-from model.backbone import BackBone
-from model.seq_recommend import SeqRecommend
-from utils.metrics import Logger
-from utils.best_thresholds import BestThreshldLogger
+from torch.utils.data.dataloader import DataLoader
+
+from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs
+from model.backbone import BackBoneV2
+from model.layers import MaskedBCEWithLogitsLoss
+from utils.best_thresholds import BestThresholdLoggerV2
 from utils.misc import calc_loss, node_type_to_prefix, get_latest_model_ckpt
 from utils.config import HeteroGraphConfig, GNNConfig
+from utils.metrics import calc_metrics_for_curr_adm_v2
+from typing import List
 
 
 if __name__ == '__main__':
@@ -24,10 +28,10 @@ if __name__ == '__main__':
     # NOTE: when max_timestep set to 30 or 50,
     #       would trigger the assert error "last timestep has not labels!"
     #       in `get_subgraph_by_timestep` (bigger max_timestep can be support in future)
-    parser.add_argument("--max_timestep",                 type=int,   default=20,                   help="The maximum `TIMESTEP`")
     parser.add_argument("--gnn_type",                                 default="GENConv")
     parser.add_argument("--gnn_layer_num",                type=int,   default=2)
     parser.add_argument("--num_decoder_layers",           type=int,   default=6)
+    parser.add_argument("--num_encoder_layers",           type=int,   default=6)
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder")
     parser.add_argument("--hidden_dim",                   type=int,   default=64)
     parser.add_argument("--lr",                           type=float, default=0.0003)
@@ -43,7 +47,7 @@ if __name__ == '__main__':
 
     # Experiment settings
     parser.add_argument("--task",                                   default="MIX",     help="the goal of the recommended task, in ['MIX', 'drug', 'labitem']")
-    parser.add_argument("--epochs",                       type=int, default=10)
+    parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False)
 
     parser.add_argument("--test",             action="store_true",  default=False)
@@ -53,134 +57,114 @@ if __name__ == '__main__':
 
     parser.add_argument("--use_gpu",          action="store_true",  default=False)
     parser.add_argument("--batch_size",                   type=int, default=16)
-    parser.add_argument("--batch_size_by_HADMID",         type=int, default=128,       help="specified the batch size that will be used for splitting the dataset by HADM_ID")
-    parser.add_argument("--neg_smp_strategy",             type=int, default=0,         help="the stratege of negative sampling")
 
     args = parser.parse_args()
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
     # 数据集位置
-    root_path = os.path.join(args.root_path_dataset, f"batch_size_{args.batch_size_by_HADMID}")
 
     # Heterogeneous graph config
-    if args.task == "MIX":
-        node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
-    else:
-        node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.task)
+    # if args.task == "MIX":
+    #     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    # else:
+    #     node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.task)
+    node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
 
-    # 设置model
-    if not args.use_seq_rec:
-        model: nn.Module = BackBone(
-            max_timestep=args.max_timestep,
-            gnn_type=args.gnn_type,
-            gnn_layer_num=args.gnn_layer_num,
-            is_gnn_only=args.is_gnn_only,
-            node_types=node_types,
-            edge_types=edge_types,
-            decoder_choice=args.decoder_choice,
-            num_decoder_layers=args.num_decoder_layers,
-            hidden_dim=args.hidden_dim,
-            neg_smp_strategy=args.neg_smp_strategy
-        ).to(device)
-    else:
-        model: nn.Module = SeqRecommend(
-            max_timestep=args.max_timestep,
-            neg_smp_strategy=args.neg_smp_strategy,
-            node_types=node_types,
-            edge_types=edge_types,
-            decoder_choice=args.decoder_choice,
-            num_layers=args.num_decoder_layers,
-            hidden_dim=args.hidden_dim,
-            is_seq_pred=args.is_seq_pred
-        ).to(device)
+    # model
+    gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
+    model = BackBoneV2(args.hidden_dim, gnn_conf, device, args.num_encoder_layers).to(device)
 
     # --- train ---
     if args.train:
         model.train()
-        if not os.path.exists(args.path_dir_thresholds): os.mkdir(args.path_dir_thresholds)
-        best_threshold_loggers = {
-            node_type: BestThreshldLogger(max_timestep=args.max_timestep, save_dir_path=args.path_dir_thresholds)
-            for node_type in node_types if node_type != 'admission'
-        }
-        loss_f = F.binary_cross_entropy_with_logits
-
-        train_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="train")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+        loss_f = MaskedBCEWithLogitsLoss()
 
+        # BestThresholdLogger
+        if not os.path.exists(args.path_dir_thresholds):
+            os.mkdir(args.path_dir_thresholds)
+        bth_logger = BestThresholdLoggerV2(args.path_dir_thresholds)
+
+        train_dataset = OneAdmOneHetero(args.root_path_dataset, "train")
+        train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
+                                      collate_fn=collect_hgs, pin_memory=True, shuffle=False)
         # train
-        # with torch.autograd.detect_anomaly():
         for epoch in tqdm(range(args.epochs)):
             if args.use_gpu:
                 torch.cuda.empty_cache()
+            t_loop = tqdm(train_dataloader, leave=False)
+            for batch_hgs, batch_d_flat, adm_lens in t_loop:
+                input_hgs = [hgs[:-1] for hgs in batch_hgs]
 
-            t_loop_train_set = tqdm(train_set, leave=False)
-            for hg in t_loop_train_set:
-                hg = hg.to(device)
-                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                    dict_every_day_pred = model(hg)
-                    loss = calc_loss(dict_every_day_pred, node_types, device, loss_f)
+                # to device
+                for i, hgs in enumerate(input_hgs):
+                    input_hgs[i] = [hg.to(device) for hg in hgs]
+                batch_d_flat = batch_d_flat.to(device)
+                adm_lens = adm_lens.to(device)
+
+                logits = model(input_hgs)
+                labels = batch_d_flat[:, 1:, :]
+                can_prd_days = adm_lens - 1  # 能预测的天数为住院时长减去第一天
+                loss = loss_f(logits, labels, adm_lens=can_prd_days)
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss.sum().backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
                 optimizer.step()  # optimizing
 
-                # log the best_threshold
-                if epoch == (args.epochs - 1):
-                    for node_type, best_threshold_logger in best_threshold_loggers.items():
-                        best_threshold_logger.log(dict_every_day_pred[node_type]["scores"],
-                                                  dict_every_day_pred[node_type]["labels"])
+                with torch.no_grad():
+                    # TODO: at last epoch, log the best_threshold
+                    if epoch == (args.epochs - 1):
+                        bth_logger.log_cur_batch(logits, labels, can_prd_days)
+                t_loop.set_postfix_str(f'\033[32m loss: {loss.sum().item():.4f} on {str(device)} \033[0m')
 
-                t_loop_train_set.set_postfix_str(f'\033[32m Current loss: {loss.item():.4f} \033[0m')
-
-        # save the best_threshold
-        for node_type, best_threshold_logger in best_threshold_loggers.items():
-            best_threshold_logger.save(
-                prefix=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
+        # train done
+        bth_logger.save()
 
         # save trained model
-        model_saving_prefix = f"task={args.task}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}"
         if not os.path.exists(args.path_dir_model_hub):
             os.mkdir(args.path_dir_model_hub)
-        torch.save(model.state_dict(),
-                   os.path.join(args.path_dir_model_hub, f"{model_saving_prefix}_loss={loss:.4f}.pt"))
+        torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub,
+                                                    f"loss_{loss.sum().item():.4f}_{model.__class__.__name__}.pt"))
 
     # --- test ---
     if args.test:
-        resl_path = os.path.join(args.path_dir_results, f"#{args.test_num}")
-        if not os.path.exists(resl_path):
-            os.mkdir(resl_path)
-
-        test_set = DiscreteTimeHeteroGraph(root_path=root_path, usage="test")
+        test_dataset = OneAdmOneHetero(args.root_path_dataset, "test")
+        test_dataloader = DataLoader(test_dataset, batch_size=1,
+                                      collate_fn=collect_hgs, pin_memory=True, shuffle=False)
 
         if not args.train:
-            # TODO: auto load last checkpoint
-            model_state_dict = torch.load(os.path.join(args.path_dir_model_hub, f"{args.test_model_state_dict}.pt"),
-                                          map_location=device)
-            model.load_state_dict(model_state_dict)
-
-        # metrics loggers
-        metrics_loggers = {}
-        for node_type in node_types:
-            if node_type == 'admission':
-                continue
-            metrics_loggers[node_type] = Logger(max_timestep=args.max_timestep,
-                                                save_dir_path=resl_path,
-                                                best_thresholdspath=os.path.join(args.path_dir_thresholds,
-                                                                                 f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}_best_thresholds.pickle"),
-                                                is_calc_ddi=True if node_type == 'drug' else False)
+            # auto load latest save model from hub
+            if not args.model_ckpt:
+                latest_model_ckpt = get_latest_model_ckpt(args.path_dir_model_hub)
+                print(f"auto using latest ckpt: {latest_model_ckpt}")
+                sd_path = os.path.join(args.path_dir_model_hub, f"{latest_model_ckpt}")
+            else:
+                sd_path = os.path.join(args.path_dir_model_hub, f"{args.model_ckpt}")
+            sd = torch.load(sd_path, map_location=device)
+            model.load_state_dict(sd)
 
         model.eval()
         with torch.no_grad():
-            for hg in tqdm(test_set):
-                hg = hg.to(device)
-                dict_every_day_pred = model(hg)
+            results: List[pd.DataFrame] = []
+            for idx, (batch_data) in tqdm(enumerate(test_dataloader)):
+                batch_hgs, batch_d_flat, adm_lens = batch_data
 
-                for node_type, metrics_logger in metrics_loggers.items():
-                    metrics_logger.log(dict_every_day_pred[node_type]["scores"],
-                                       dict_every_day_pred[node_type]["labels"],
-                                       dict_every_day_pred[node_type]["indices"] if node_type == 'drug' else None)
+                B, max_adm_len, _ = batch_d_flat.size()  # B = 1
 
-        for node_type, metrics_logger in metrics_loggers.items():
-            metrics_logger.save(
-                description=f"4{node_type_to_prefix[node_type]}_gnn_type={args.gnn_type}_batch_size_by_HADMID={args.batch_size_by_HADMID}")
+                input_hgs = [hgs[:-1] for hgs in batch_hgs]  # 输入模型的数据不包括最后一天（因为没有下一天去预测了）
+
+                # to device
+                for i, hgs in enumerate(input_hgs):
+                    input_hgs[i] = [hg.to(device) for hg in hgs]
+                batch_d_flat = batch_d_flat.to(device)
+                adm_lens = adm_lens.to(device)
+
+                logits = model(input_hgs)  # 生成了此患者从第二天开始的药物集合预测
+                labels = batch_d_flat[:, 1:, :]
+
+                result = calc_metrics_for_curr_adm_v2(idx, logits, labels)
+                results.append(result)
+
+            results: pd.DataFrame = pd.concat(results)
+            results.to_csv()  # TODO: specify path

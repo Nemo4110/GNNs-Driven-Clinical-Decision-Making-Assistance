@@ -48,6 +48,7 @@ class HeteroGraphConfig:
 
 
 max_seq_length = 150
+max_adm_length = 50
 
 
 @dataclass

@@ -8,8 +8,10 @@ from torch_geometric.data import HeteroData
 from model.layers import LinksPredictor, PositionalEncoding, decode, get_decoder_by_choice
 from dataset.hgs import DiscreteTimeHeteroGraph
 from utils.config import MappingManager, HeteroGraphConfig
+from deprecated import deprecated
 
 
+@deprecated("This model is not suitable for current ond adm on hg dataset")
 class SeqRecommend(nn.Module):
     def __init__(self,
                  max_timestep: int,

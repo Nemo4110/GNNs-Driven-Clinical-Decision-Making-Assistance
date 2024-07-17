@@ -36,6 +36,14 @@ node_type_to_prefix = {
 }
 
 
+def get_latest_threshold(bth_path):
+    files = glob.glob(os.path.join(bth_path, '*.pickle'))
+    if not files:
+        return None
+    latest_file = max(files, key=os.path.getmtime)
+    return os.path.basename(latest_file)
+
+
 def get_latest_model_ckpt(folder_path):
     # 获取指定文件夹下的所有.pt文件路径
     files = glob.glob(os.path.join(folder_path, '*.pt'))

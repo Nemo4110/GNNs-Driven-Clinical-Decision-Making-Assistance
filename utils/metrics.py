@@ -17,10 +17,18 @@ from sklearn.metrics import \
     precision_recall_curve, \
     average_precision_score
 from utils.ddi import DDICalculator
+from utils.constant import bth_path
+from utils.misc import get_latest_threshold
 from typing import List
+from deprecated import deprecated
+
 
 sys.path.append('..')
 ddi_calculator = DDICalculator()
+
+bth_filename = get_latest_threshold(bth_path)
+with open(os.path.join(bth_path, bth_filename), 'rb') as f:
+    best_thresholds_by_days = pickle.load(f)
 
 
 def flat_indices_to_voc_size(indices: List[int], voc_size, exclude_indices=None) -> np.ndarray:
@@ -150,6 +158,25 @@ def calc_metrics_for_curr_adm(
     return result
 
 
+def calc_metrics_for_curr_adm_v2(
+    idx, all_day_logits, all_day_labels,
+    metric_functions=(rocauc, prauc, accuracy, jaccard, precision, recall, ddi_preds, ddi_trues)
+):
+    result = pd.DataFrame(columns=['id', 'day'] + [mf.__name__ for mf in metric_functions])
+
+    # all_day_probs and all_day_labels have same shape: (1, adm_len, d_voc_size)
+    all_day_logits = all_day_logits.squeeze(0)
+    all_day_labels = all_day_labels.squeeze(0)
+    for i, (cur_day_logits, cur_day_labels) in \
+    enumerate(zip(all_day_logits, all_day_labels)):
+        cur_day = i + 1
+        cur_day_bth = best_thresholds_by_days[cur_day]
+        cur_day_preds = cur_day_logits > cur_day_bth
+        result.loc[len(result)] = [idx, cur_day] + [mf(cur_day_preds, cur_day_logits, cur_day_labels) for mf in metric_functions]
+    return result
+
+
+@deprecated("This model is not suitable for current ond adm on hg dataset")
 class Logger:
     r"""For logging testing metrics.
 

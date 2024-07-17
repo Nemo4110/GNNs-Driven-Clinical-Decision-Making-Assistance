@@ -1,3 +1,7 @@
+import os.path as path
+
+bth_path = path.join(".", "thresholds")  # 存放best threshold 的文件夹位置
+
 PATH_MIMIC_III            = r"/content/drive/MyDrive/source_data/mimic-iii-clinical-database-1.4"  # path of MIMIC-III dataset directory
 PATH_MIMIC_III_ETL_OUTPUT = r"/content/drive/MyDrive/etl_output/mimic-iii-clinical-database-1.4"  # path for pre-processing output
 # PATH_MIMIC_III_HGS_OUTPUT = r"/content/drive/MyDrive/etl_output/mimic-iii-hgs"  # path of directory for dynamic discrete time heterogeneous graphs output

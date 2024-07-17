@@ -8,11 +8,14 @@ import torch
 import pickle
 
 from sklearn.metrics import roc_curve
+from collections import defaultdict
+from deprecated import deprecated
 
 sys.path.append('..')
 
 
-class BestThreshldLogger:
+@deprecated
+class BestThresholdLogger:
     def __init__(self, max_timestep, save_dir_path: str) -> None:
         self.save_dir_path = save_dir_path
 
@@ -45,3 +48,26 @@ class BestThreshldLogger:
         
         with open(os.path.join(self.save_dir_path, f"{prefix}_best_thresholds.pickle"), 'wb') as f:
             pickle.dump(self.dict_best_threholds, f)
+
+
+class BestThresholdLoggerV2:
+    def __init__(self, path_to_save):
+        self.best_thresholds_by_days = defaultdict(list)
+        self.path_to_save = path_to_save
+
+    def log_cur_batch(self, logits, labels, adm_lens):
+        logits, labels = logits.cpu().detach(), labels.cpu().detach()
+        B, max_adm_len = logits.size(0), logits.size(1)
+        for i in range(B):  # 一个一个患者
+            for j in range(adm_lens[i]):  # day
+                cur_day = j + 1  # 因为从第二天（idx=1）开始预测
+                cur_day_pred = logits[i, j]
+                cur_day_true = labels[i, j]
+                fpr, tpr, thresholds = roc_curve(cur_day_true, cur_day_pred)
+                cur_day_best_th = thresholds[np.argmax(tpr - fpr)]
+                self.best_thresholds_by_days[cur_day].append(cur_day_best_th)
+
+    def save(self):
+        best_thresholds_by_days = {day: sum(l) / len(l) for day, l in self.best_thresholds_by_days.items()}
+        with open(os.path.join(self.path_to_save, "bth_by_day.pickle"), 'wb') as f:
+            pickle.dump(best_thresholds_by_days, f)

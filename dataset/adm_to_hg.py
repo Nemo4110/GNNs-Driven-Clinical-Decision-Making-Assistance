@@ -1,9 +1,11 @@
 import os
 import torch
 import sys; sys.path.append("..")
+import utils.config as conf
 
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Dataset
+from utils.config import MappingManager
 from dataset.hgs import DiscreteTimeHeteroGraph
 
 
@@ -92,6 +94,34 @@ def collect_fn(batch):
     return batch_hgs, \
         batch_l, batch_l_mask, T_batch_l_lens, \
         batch_d, batch_d_mask, T_batch_d_lens
+
+
+def collect_hgs(batch):
+    batch_hgs = [DiscreteTimeHeteroGraph.split_by_day(hg) for hg in batch]
+    B = len(batch)   # batch shape: [B, ?], ?表示每个患者住院天数不一
+    d_vocab_size = MappingManager.node_type_to_node_num['drug']
+
+    adm_lens = [len(hgs) for hgs in batch_hgs]
+
+    max_adm_len = max(adm_lens)
+    max_adm_len = min(max_adm_len, conf.max_adm_length)  # 对最长住院天数长度进行截断，存在极端个例，住院长达873天；暂限制<=50
+
+    batch_hgs = [hgs[:max_adm_len] for hgs in batch_hgs]  # 取前max_adm_len天
+    for i, a_l in enumerate(adm_lens):  # 更新住院长度记录
+        if a_l > max_adm_len:
+            adm_lens[i] = max_adm_len
+
+    batch_d_seq = []
+    for hgs in batch_hgs:
+        prs = [hg["admission", "took",   "drug"].edge_index[1, :] for hg in hgs]
+        batch_d_seq.append(prs)
+
+    batch_d_flat = torch.full((B, max_adm_len, d_vocab_size), 0.)
+    for i in range(B):
+        for j in range(adm_lens[i]):
+            batch_d_flat[i, j, batch_d_seq[i][j]] = 1.
+
+    return batch_hgs, batch_d_flat, torch.tensor(adm_lens)
 
 
 if __name__ == "__main__":

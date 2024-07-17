@@ -151,7 +151,33 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         return X
 
 
+class MaskedBCEWithLogitsLoss(nn.BCEWithLogitsLoss):
+    def forward(self, pred, label, adm_lens):
+        # pred and label have the same shape
+        weights = torch.zeros_like(label)
+        weights = MaskedBCEWithLogitsLoss.mask_pad_adm(weights, adm_lens)
+        self.reduction = 'none'
+        unweighted_loss = super(MaskedBCEWithLogitsLoss, self).forward(pred, label)
+        weighted_loss = (unweighted_loss * weights).mean(dim=-1)
+        return weighted_loss
+
+    @staticmethod
+    def mask_pad_adm(X, adm_lens):
+        """屏蔽batch中填充的住院天
+        X: (B, max_adm_len, med_vocab_size)
+        adm_lens: (B,)
+        """
+        B, max_adm_len = X.size(0), X.size(1)
+        for i in range(B):
+            X[i, :adm_lens[i], :] = 1.
+
+        return X
+
+
 if __name__ == "__main__":
-    pe = PositionalEncoding(64, 20)
-    node_feats = torch.rand(20, 753, 64)
-    node_feats_pe = pe(node_feats)
+    pred = torch.randn((2, 3, 4))
+    label = torch.randint(0, 1, (2, 3, 4)).float()
+    adm_lens = torch.tensor([1, 3])
+    loss_f = MaskedBCEWithLogitsLoss()
+    loss = loss_f(pred, label, adm_lens)
+
