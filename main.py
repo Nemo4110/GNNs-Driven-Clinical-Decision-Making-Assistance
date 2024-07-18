@@ -115,7 +115,9 @@ if __name__ == '__main__':
                 with torch.no_grad():
                     # TODO: at last epoch, log the best_threshold
                     if epoch == (args.epochs - 1):
-                        bth_logger.log_cur_batch(logits, labels, can_prd_days)
+                        # 注意这里传给最佳阈值计算函数的logit需要sigmoid()，
+                        # 原因见：https://pytorch.org/docs/1.12/generated/torch.nn.BCEWithLogitsLoss.html#torch.nn.BCEWithLogitsLoss
+                        bth_logger.log_cur_batch(logits.sigmoid(), labels, can_prd_days)
                 t_loop.set_postfix_str(f'\033[32m loss: {loss.sum(-1).mean().item():.4f} on {str(device)} \033[0m')
 
         # train done

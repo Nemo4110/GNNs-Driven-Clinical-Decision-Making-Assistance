@@ -167,16 +167,16 @@ def calc_metrics_for_curr_adm_v2(
     # all_day_probs and all_day_labels have same shape: (1, adm_len, d_voc_size)
     all_day_logits = all_day_logits.squeeze(0)
     all_day_labels = all_day_labels.squeeze(0)
-    for i, (cur_day_logits, cur_day_labels) in \
-    enumerate(zip(all_day_logits, all_day_labels)):
+    for i, (cur_day_logits, cur_day_labels) in enumerate(zip(all_day_logits, all_day_labels)):
         cur_day = i + 1
         cur_day_bth = best_thresholds_by_days[cur_day]
         cur_day_preds = cur_day_logits > cur_day_bth
-        result.loc[len(result)] = [idx, cur_day] + [mf(cur_day_preds, cur_day_logits, cur_day_labels) for mf in metric_functions]
+        result.loc[len(result)] = ([idx, cur_day] +
+                                   [mf(cur_day_preds.numpy(), cur_day_logits.numpy(), cur_day_labels.numpy()) for mf in metric_functions])
     return result
 
 
-@deprecated("This model is not suitable for current ond adm on hg dataset")
+@deprecated
 class Logger:
     r"""For logging testing metrics.
 
