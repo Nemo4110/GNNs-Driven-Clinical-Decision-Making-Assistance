@@ -9,7 +9,7 @@ import utils.constant as constant
 from tqdm import tqdm
 from torch.utils.data.dataloader import DataLoader
 
-from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs
+from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
 from model.backbone import BackBoneV2
 from model.layers import MaskedBCEWithLogitsLoss
 from utils.best_thresholds import BestThresholdLoggerV2
@@ -78,7 +78,6 @@ if __name__ == '__main__':
     if args.train:
         model.train()
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-        loss_f = MaskedBCEWithLogitsLoss()
 
         # BestThresholdLogger
         if not os.path.exists(args.path_dir_thresholds):
@@ -93,32 +92,32 @@ if __name__ == '__main__':
             if args.use_gpu:
                 torch.cuda.empty_cache()
             t_loop = tqdm(train_dataloader, leave=False)
-            for batch_hgs, batch_d_flat, adm_lens in t_loop:
+            for batch_hgs, batch_d_seq, batch_d_neg, adm_lens in t_loop:
+                # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]
 
                 # to device
                 for i, hgs in enumerate(input_hgs):
                     input_hgs[i] = [hg.to(device) for hg in hgs]
-                batch_d_flat = batch_d_flat.to(device)
-                adm_lens = adm_lens.to(device)
 
-                logits = model(input_hgs)
-                labels = batch_d_flat[:, 1:, :]
-                can_prd_days = adm_lens - 1  # 能预测的天数为住院时长减去第一天
-                loss = loss_f(logits, labels, adm_lens=can_prd_days)
+                batch_d_seq_to_be_judged, batch_01_labels = \
+                    get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg, device)
+
+                logits, loss = model(input_hgs, batch_d_seq_to_be_judged, batch_01_labels)
 
                 optimizer.zero_grad()
-                loss.sum().backward()
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
                 optimizer.step()  # optimizing
 
                 with torch.no_grad():
-                    # TODO: at last epoch, log the best_threshold
+                    # at last epoch, log the best_threshold
                     if epoch == (args.epochs - 1):
-                        # 注意这里传给最佳阈值计算函数的logit需要sigmoid()，
+                        can_prd_days = [_ - 1 for _ in adm_lens]  # 能预测的天数为总的住院时长减去第一天
+                        # 注意！这里传给最佳阈值计算函数的logits需要sigmoid()，
                         # 原因见：https://pytorch.org/docs/1.12/generated/torch.nn.BCEWithLogitsLoss.html#torch.nn.BCEWithLogitsLoss
-                        bth_logger.log_cur_batch(logits.sigmoid(), labels, can_prd_days)
-                t_loop.set_postfix_str(f'\033[32m loss: {loss.sum(-1).mean().item():.4f} on {str(device)} \033[0m')
+                        bth_logger.log_cur_batch(logits, batch_01_labels, can_prd_days)
+                    t_loop.set_postfix_str(f'\033[32m loss: {loss.item() / args.batch_size:.4f} on {str(device)} \033[0m')
 
         # train done
         bth_logger.save()
@@ -138,11 +137,12 @@ if __name__ == '__main__':
         if not args.train:
             # auto load latest save model from hub
             if not args.model_ckpt:
-                latest_model_ckpt = get_latest_model_ckpt(args.path_dir_model_hub)
-                print(f"auto using latest ckpt: {latest_model_ckpt}")
-                sd_path = os.path.join(args.path_dir_model_hub, f"{latest_model_ckpt}")
+                ckpt_filename = get_latest_model_ckpt(args.path_dir_model_hub)
             else:
-                sd_path = os.path.join(args.path_dir_model_hub, f"{args.model_ckpt}")
+                ckpt_filename = args.model_ckpt
+            assert ckpt_filename is not None
+            print(f"using saved model: {ckpt_filename}")
+            sd_path = os.path.join(args.path_dir_model_hub, ckpt_filename)
             sd = torch.load(sd_path, map_location=device)
             model.load_state_dict(sd)
 
@@ -150,23 +150,21 @@ if __name__ == '__main__':
         with torch.no_grad():
             results: List[pd.DataFrame] = []
             for idx, (batch_data) in tqdm(enumerate(test_dataloader)):
-                batch_hgs, batch_d_flat, adm_lens = batch_data
-
-                B, max_adm_len, _ = batch_d_flat.size()  # B = 1
+                batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch_data
 
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]  # 输入模型的数据不包括最后一天（因为没有下一天去预测了）
 
                 # to device
                 for i, hgs in enumerate(input_hgs):
                     input_hgs[i] = [hg.to(device) for hg in hgs]
-                batch_d_flat = batch_d_flat.to(device)
-                adm_lens = adm_lens.to(device)
 
-                logits = model(input_hgs)  # 生成了此患者从第二天开始的药物集合预测
-                labels = batch_d_flat[:, 1:, :]
+                batch_d_seq_to_be_judged, batch_01_labels = \
+                    get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg, device)
 
-                result = calc_metrics_for_curr_adm_v2(idx, logits, labels)
+                logits = model(input_hgs, batch_d_seq_to_be_judged, None)  # 生成了此患者从第二天开始的药物集合预测
+
+                result = calc_metrics_for_curr_adm_v2(idx, logits, batch_01_labels, batch_d_seq_to_be_judged)
                 results.append(result)
 
             results: pd.DataFrame = pd.concat(results)
-            results.to_csv()  # TODO: specify path
+            results.to_csv(os.path.join(args.path_dir_results, f"{ckpt_filename}.csv"))

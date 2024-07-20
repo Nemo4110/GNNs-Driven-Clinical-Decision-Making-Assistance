@@ -1,5 +1,6 @@
 import sys; sys.path.append('..')
 import torch.nn as nn
+import torch.nn.functional as F
 import torch
 
 from torch.nn.utils.rnn import pad_sequence
@@ -8,157 +9,10 @@ from torch_geometric.nn import to_hetero
 from typing import List, Tuple
 from torch.utils.data.dataloader import DataLoader
 from dataset.hgs import DiscreteTimeHeteroGraph
-from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs
+from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
 from utils.config import HeteroGraphConfig, MappingManager, GNNConfig
 from utils.misc import sequence_mask
 from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode, MaskedBCEWithLogitsLoss
-from deprecated import deprecated
-
-
-@deprecated("This model is not suitable for current ond adm on hg dataset")
-class BackBone(nn.Module):
-    def __init__(self,
-                 max_timestep: int,
-                 gnn_type: str,
-                 neg_smp_strategy: int,
-
-                 node_types: List[str],
-                 edge_types: List[Tuple[str, str, str]],
-
-                 decoder_choice: str = "TransformerDecoder",
-                 num_decoder_layers=6,
-                 hidden_dim: int = 128,
-                 is_gnn_only: bool = False,
-                 gnn_layer_num: int = 2):
-        super().__init__()
-
-        self.max_timestep = max_timestep
-        
-        self.gnn_type = gnn_type
-        self.gnn_layer_num = gnn_layer_num
-        self.is_gnn_only = is_gnn_only
-
-        self.neg_smp_strategy = neg_smp_strategy
-
-        self.node_types = node_types
-        self.edge_types = edge_types
-
-        self.decoder_choice = decoder_choice
-        self.num_decoder_layers = num_decoder_layers
-
-        self.hidden_dim = hidden_dim
-
-        # EMBD
-        # ~~Think about the first args of `nn.Embedding` here should equal to~~
-        #  - max of total `HADM_ID`?
-        #  - current batch_size of `HADM_ID`?
-        #  √ Or just deprecate the `nn.Embedding` as we already have the node_features
-        self.module_dict_embedding = nn.ModuleDict({
-            node_type: nn.Embedding(MappingManager.node_type_to_node_num[node_type], self.hidden_dim) \
-            for node_type in self.node_types if node_type != 'admission'
-        })
-
-        # LIKES_PREDICTOR
-        self.module_dict_links_predictor = nn.ModuleDict({
-            node_type: LinksPredictor(hidden_dim=self.hidden_dim) \
-            for node_type in self.node_types if node_type != "admission"
-        })
-
-        # PROJ
-        self.module_dict_node_feat_proj = nn.ModuleDict({
-            node_type: nn.Linear(in_features=MappingManager.node_type_to_node_feat_dim_in[node_type], out_features=self.hidden_dim) \
-            for node_type in self.node_types
-        })
-        self.module_dict_edge_feat_proj = nn.ModuleDict({
-            # TypeError: module name should be a string. Got tuple
-            "_".join(edge_type): nn.Linear(in_features=MappingManager.edge_type_to_edge_feat_dim_in[edge_type], out_features=self.hidden_dim) \
-            for edge_type in self.edge_types
-        })
-
-        self.position_encoding = PositionalEncoding(hidden_dim=self.hidden_dim, max_timestep=self.max_timestep)
-
-        self.gnn = SingelGnn(hidden_dim=self.hidden_dim, gnn_type=self.gnn_type, gnn_layer_num=self.gnn_layer_num)
-        self.gnn = to_hetero(self.gnn, metadata=(self.node_types, self.edge_types))
-
-        # DECODER
-        self.module_dict_decoder = nn.ModuleDict({
-            node_type: get_decoder_by_choice(choice=self.decoder_choice, hidden_dim=self.hidden_dim, num_layers=self.num_decoder_layers)
-            for node_type in self.node_types
-        })
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        for weight in self.parameters():
-            if len(weight.shape) > 1:
-                nn.init.xavier_normal_(weight)
-
-    def forward(self, hg: HeteroData):
-        num_adm = hg['admission'].node_id.size(0)
-
-        # EMB & PRJ
-        for node_type in self.node_types:
-            if node_type != 'admission':
-                hg[node_type].x = self.module_dict_node_feat_proj[node_type](hg[node_type].x.float()) + self.module_dict_embedding[node_type](hg[node_type].node_id)
-            else:
-                hg[node_type].x = self.module_dict_node_feat_proj[node_type](hg[node_type].x.float())
-
-        for edge_type in self.edge_types:
-            if 'rev' in edge_type[1]: continue
-            hg[edge_type].x = self.module_dict_edge_feat_proj["_".join(edge_type)](hg[edge_type].x.float())
-
-        hgs = [DiscreteTimeHeteroGraph.get_subgraph_by_timestep(hg, timestep=t, neg_smp_strategy=self.neg_smp_strategy)
-               for t in range(self.max_timestep)]
-
-        # pack to batch for mini-batch processing in time (days) axis
-        batch_hgs = DiscreteTimeHeteroGraph.pack_batch(hgs, self.max_timestep)
-
-        # go through gnn
-        x_collection = batch_hgs.collect('x')
-        node_feats_ori = {k: x for k, x in x_collection.items() if k in self.node_types}
-        edge_feats_ori = {k: x for k, x in x_collection.items() if k in self.edge_types}
-
-        # encoded node_feats, is a dict, every value has shape [T * B, H]
-        node_feats_enc = self.gnn(node_feats_ori, batch_hgs.edge_index_dict, edge_feats_ori)
-
-        # reshape (unpack)
-        for node_type in node_feats_enc.keys():
-            if node_type == 'admission':
-                node_feats_enc[node_type] = node_feats_enc[node_type].view(-1, num_adm, self.hidden_dim)  # [T, B, H]
-                node_feats_ori[node_type] = node_feats_ori[node_type].view(-1, num_adm, self.hidden_dim)  # [T, B, H]
-            else:
-                node_feats_enc[node_type] = node_feats_enc[node_type].view(-1, MappingManager.node_type_to_node_num[node_type], self.hidden_dim)
-                node_feats_ori[node_type] = node_feats_ori[node_type].view(-1, MappingManager.node_type_to_node_num[node_type], self.hidden_dim)
-
-        # decode
-        node_feat_dec = {}
-        if not self.is_gnn_only:
-            for node_type, node_feat in node_feats_enc.items():
-                node_feat_ori = node_feats_ori[node_type][0].unsqueeze(0)
-                node_feat_pos = self.position_encoding(node_feat)
-                node_feat_dec[node_type] = decode(self.module_dict_decoder[node_type], input_seq=node_feat_pos, h_0=node_feat_ori)  # update
-
-        dict_every_day_pred = {}
-        for edge_type in self.edge_types:
-            if 'rev' in edge_type[1]:
-                continue
-            else:
-                user_node_type = edge_type[0]
-                item_node_type = edge_type[-1]
-                dict_every_day_pred[item_node_type] = {
-                    "scores": [
-                        # Link predicting:
-                        self.module_dict_links_predictor[item_node_type](
-                            node_feat_dec[user_node_type][curr_timestep],
-                            node_feat_dec[item_node_type][curr_timestep],
-                            hg[edge_type].labels_index
-                        ) for curr_timestep, hg in enumerate(hgs)
-                    ],
-                    "labels": [hg[edge_type].labels for hg in hgs],
-                    "indices": [hg[edge_type].labels_index for hg in hgs]
-                }
-
-        return dict_every_day_pred
 
 
 class BackBoneV2(nn.Module):
@@ -200,9 +54,12 @@ class BackBoneV2(nn.Module):
         self.gnn = SingelGnn(self.h_dim, self.gnn_conf.gnn_type, self.gnn_conf.gnn_layer_num)
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
 
-        self.d_proj = nn.Linear(self.h_dim, self.med_vocab_size, bias=False)
+        # Final links predictor
+        self.d_lp = LinksPredictor(self.h_dim)
 
-    def forward(self, batch_hgs):
+    def forward(self, batch_hgs,
+                batch_d_seq_to_be_judged: List[List[torch.tensor]],
+                batch_01_labels: List[List[torch.tensor]] = None):
         B = len(batch_hgs)
         adm_lens = [len(hgs) for hgs in batch_hgs]
         max_adm_len = max(adm_lens)
@@ -247,27 +104,48 @@ class BackBoneV2(nn.Module):
         patients_condition = self.patient_condition_encoder(
             patients_condition, mask=subsequent_mask, src_key_padding_mask=padding_mask)  # (B, max_adm_len, h_dim)
 
-        # 将最后的一维映射回药物集大小
-        logits = self.d_proj(patients_condition.view(-1, self.h_dim))
-        logits = logits.view(B, max_adm_len, self.med_vocab_size)
+        # 目前先用对应天的患者病情表示 与 对应药物Embedding进行相乘 获取分数
+        logits = []
+        for i in range(B):
+            cur_adm_logits: List[torch.tensor] = []
+            for j in range(adm_lens[i]):  # 遍历住院天
+                cur_day_pc = patients_condition[i, j]  # 当前患者当前天的病情表示（使用之前天的信息）
+                cur_day_logits = self.d_lp(cur_day_pc, self.d_emb(batch_d_seq_to_be_judged[i][j]))
+                cur_adm_logits.append(cur_day_logits)
+            logits.append(cur_adm_logits)
 
-        return logits
+        if batch_01_labels is not None:
+            loss = self.get_loss(logits, batch_01_labels)
+            return logits, loss
+
+        else:
+            return logits
+
+    def get_loss(self, logits, batch_01_labels):
+        total_loss = torch.tensor(0.0).to(self.device)
+        for cur_adm_logits, cur_adm_labels in zip(logits, batch_01_labels):
+            t_cur_adm_logits = torch.cat(cur_adm_logits)
+            t_cur_adm_labels = torch.cat(cur_adm_labels)
+            cur_adm_loss = F.binary_cross_entropy_with_logits(t_cur_adm_logits, t_cur_adm_labels)
+            total_loss += cur_adm_loss
+        return total_loss  # 当前批次的总loss
 
 
 if __name__ == "__main__":
     test_dataset = OneAdmOneHetero(r"..\data", "test")
-    test_dataloader = DataLoader(test_dataset, batch_size=16, collate_fn=collect_hgs, pin_memory=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collect_hgs, pin_memory=True)
 
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
     model = BackBoneV2(64, gnn_conf, torch.device('cpu'))
-    loss_f = MaskedBCEWithLogitsLoss()
 
-    for batch_hgs, batch_d_flat, adm_lens in test_dataloader:
+    for batch in test_dataloader:
+        batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch
+
+        # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
         input_hgs = [hgs[:-1] for hgs in batch_hgs]
-        logits = model(input_hgs)
-        labels = batch_d_flat[:, 1:, :]
-        can_prd_days = adm_lens - 1  # 能预测的天数为住院时长减去第一天
-        loss = loss_f(logits, labels, adm_len=can_prd_days)
-        print(loss.sum().item())
-        break
+
+        batch_d_seq_to_be_judged, batch_01_labels = \
+            get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+
+        logits, loss = model(input_hgs, batch_d_seq_to_be_judged, batch_01_labels)

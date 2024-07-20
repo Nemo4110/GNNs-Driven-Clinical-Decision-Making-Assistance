@@ -53,23 +53,30 @@ class BestThresholdLogger:
 class BestThresholdLoggerV2:
     def __init__(self, path_to_save):
         self.best_thresholds_by_days = defaultdict(list)
+        self.pred_by_days = defaultdict(list)
+        self.true_by_days = defaultdict(list)
         self.path_to_save = path_to_save
 
     def log_cur_batch(self, logits, labels, adm_lens):
-        logits, labels = logits.cpu().detach(), labels.cpu().detach()
-        B, max_adm_len = logits.size(0), logits.size(1)
+        B = len(logits)
         for i in range(B):  # 一个一个患者
             for j in range(adm_lens[i]):  # day
                 cur_day = j + 1  # 因为从第二天（idx=1）开始预测
-                cur_day_pred = logits[i, j]
-                cur_day_true = labels[i, j]
-                if cur_day_true.sum() == 0:  # 若这天没有正样本，则跳过
-                    continue
-                fpr, tpr, thresholds = roc_curve(cur_day_true, cur_day_pred)
-                cur_day_best_th = thresholds[np.argmax(tpr - fpr)]
-                self.best_thresholds_by_days[cur_day].append(cur_day_best_th)
+                cur_day_pred = logits[i][j].cpu().bfloat16().sigmoid()  # logits中的每个tensor需要sigmoid
+                cur_day_true = labels[i][j].cpu().bool()
+                self.pred_by_days[cur_day].extend(cur_day_pred.tolist())
+                self.true_by_days[cur_day].extend(cur_day_true.tolist())
 
     def save(self):
-        best_thresholds_by_days = {day: sum(l) / len(l) for day, l in self.best_thresholds_by_days.items()}
+        assert len(self.pred_by_days) == len(self.true_by_days)
+
+        best_thresholds_by_days = {}
+        for cur_day in self.pred_by_days.keys():
+            cur_day_true = self.true_by_days[cur_day]
+            cur_day_pred = self.pred_by_days[cur_day]
+            fpr, tpr, thresholds = roc_curve(cur_day_true, cur_day_pred)
+            cur_day_best_th = thresholds[np.argmax(tpr - fpr)]
+            best_thresholds_by_days[cur_day] = cur_day_best_th
+
         with open(os.path.join(self.path_to_save, "bth_by_day.pickle"), 'wb') as f:
             pickle.dump(best_thresholds_by_days, f)

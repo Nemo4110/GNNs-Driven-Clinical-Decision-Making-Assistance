@@ -71,14 +71,11 @@ class LinksPredictor(nn.Module):
         self.re_weight_a = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.re_weight_b = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
 
-    def forward(self, node_features_a, node_features_b, edge_label_index):
-        node_features_a_selected = node_features_a[edge_label_index[0]]
-        node_features_b_selected = node_features_b[edge_label_index[1]]
+    def forward(self, cur_day_patient_condition, item_features_selected):
+        a = self.re_weight_a(cur_day_patient_condition)
+        b = self.re_weight_b(item_features_selected)
 
-        node_features_a_selected = self.re_weight_a(node_features_a_selected)
-        node_features_b_selected = self.re_weight_b(node_features_b_selected)
-
-        return (node_features_a_selected * node_features_b_selected).sum(dim=-1)
+        return a @ b.t()  # 或是点乘
 
 
 def get_decoder_by_choice(choice: str, hidden_dim: int, num_layers: int = 1):
