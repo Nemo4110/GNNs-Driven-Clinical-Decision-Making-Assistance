@@ -167,7 +167,6 @@ def calc_metrics_for_curr_adm(
         # 新增一行（天的）指标结果
         result.loc[len(result)] = [idx, cur_day] + [mf(cur_day_preds, cur_day_probs, cur_day_labels) for mf in metric_functions]
 
-    # TODO: 用precision, recall这两列计算每天的f1
     result['f1'] = result.apply(calculate_f1, axis=1)
 
     return result
@@ -187,7 +186,7 @@ def calc_metrics_for_curr_adm_v2(
 
     for i, (cur_day_logits, cur_day_labels, cur_day_d_seq_to_be_judged) in enumerate(
         zip(all_day_logits, all_day_labels, all_day_d_seq_to_be_judged)):
-        cur_day_logits = cur_day_logits.cpu().bfloat16().sigmoid()  # 需要先sigmoid！
+        cur_day_logits = cur_day_logits.cpu().sigmoid()  # 需要先sigmoid！
         cur_day_labels = cur_day_labels.cpu().bool()
 
         cur_day = i + 1
@@ -201,17 +200,19 @@ def calc_metrics_for_curr_adm_v2(
         cur_day_preds = cur_day_logits > cur_day_bth  # logits转换为[0, 1]
 
         # 从cur_day_d_seq_to_be_judged中获取对应预测的药物
-        cur_day_predicted_d_ind = torch.nonzero(cur_day_preds).squeeze(0)
+        cur_day_predicted_d_ind = torch.nonzero(cur_day_preds).squeeze(1)
         cur_day_predicted_d_seq = torch.index_select(cur_day_d_seq_to_be_judged, 0, cur_day_predicted_d_ind)
 
-        cur_day_ground_true_d_ind = torch.nonzero(cur_day_labels).squeeze(0)
+        cur_day_ground_true_d_ind = torch.nonzero(cur_day_labels).squeeze(1)
         cur_day_ground_true_d_seq = torch.index_select(cur_day_d_seq_to_be_judged, 0, cur_day_ground_true_d_ind)
 
         result.loc[len(result)] = ([idx, cur_day] +
                                    [mf(cur_day_preds, cur_day_logits, cur_day_labels, is_01=True,
                                        cur_day_predicted_d_seq=cur_day_predicted_d_seq,
-                                       cur_day_ground_true_d_seq=cur_day_ground_true_d_seq) \
+                                       cur_day_ground_true_d_seq=cur_day_ground_true_d_seq)
                                     for mf in metric_functions])
+
+    result['f1'] = result.apply(calculate_f1, axis=1)
     return result
 
 

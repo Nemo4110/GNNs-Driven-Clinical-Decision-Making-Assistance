@@ -11,7 +11,6 @@ from torch.utils.data.dataloader import DataLoader
 
 from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
 from model.backbone import BackBoneV2
-from model.layers import MaskedBCEWithLogitsLoss
 from utils.best_thresholds import BestThresholdLoggerV2
 from utils.misc import calc_loss, node_type_to_prefix, get_latest_model_ckpt
 from utils.config import HeteroGraphConfig, GNNConfig
@@ -166,5 +165,5 @@ if __name__ == '__main__':
                 result = calc_metrics_for_curr_adm_v2(idx, logits, batch_01_labels, batch_d_seq_to_be_judged)
                 results.append(result)
 
-            results: pd.DataFrame = pd.concat(results)
-            results.to_csv(os.path.join(args.path_dir_results, f"{ckpt_filename}.csv"))
+        results: pd.DataFrame = pd.concat(results)
+        results.to_csv(os.path.join(args.path_dir_results, f"{ckpt_filename}.csv"))
