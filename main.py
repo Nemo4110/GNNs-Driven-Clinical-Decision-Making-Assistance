@@ -6,13 +6,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import utils.constant as constant
 
-from tqdm import tqdm
 from torch.utils.data.dataloader import DataLoader
 
 from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
 from model.backbone import BackBoneV2
 from utils.best_thresholds import BestThresholdLoggerV2
-from utils.misc import calc_loss, node_type_to_prefix, get_latest_model_ckpt
+from utils.misc import get_latest_model_ckpt
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import calc_metrics_for_curr_adm_v2
 from typing import List
@@ -60,6 +59,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    print(f"using device: {str(device)}")
     # 数据集位置
 
     # Heterogeneous graph config
@@ -87,11 +87,10 @@ if __name__ == '__main__':
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                       collate_fn=collect_hgs, pin_memory=True, shuffle=False)
         # train
-        for epoch in tqdm(range(args.epochs)):
+        for epoch in range(args.epochs):
             if args.use_gpu:
                 torch.cuda.empty_cache()
-            t_loop = tqdm(train_dataloader, leave=False)
-            for batch_hgs, batch_d_seq, batch_d_neg, adm_lens in t_loop:
+            for batch_hgs, batch_d_seq, batch_d_neg, adm_lens in train_dataloader:
                 # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]
 
@@ -116,7 +115,7 @@ if __name__ == '__main__':
                         # 注意！这里传给最佳阈值计算函数的logits需要sigmoid()，
                         # 原因见：https://pytorch.org/docs/1.12/generated/torch.nn.BCEWithLogitsLoss.html#torch.nn.BCEWithLogitsLoss
                         bth_logger.log_cur_batch(logits, batch_01_labels, can_prd_days)
-                    t_loop.set_postfix_str(f'\033[32m loss: {loss.item() / args.batch_size:.4f} on {str(device)} \033[0m')
+                    print(f'\033[32m {epoch:02} / {args.epochs:02} epochs, loss: {loss.item() / args.batch_size:.4f} \033[0m', flush=True)
 
         # train done
         bth_logger.save()
@@ -148,7 +147,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             results: List[pd.DataFrame] = []
-            for idx, (batch_data) in tqdm(enumerate(test_dataloader)):
+            for idx, (batch_data) in enumerate(test_dataloader):
                 batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch_data
 
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]  # 输入模型的数据不包括最后一天（因为没有下一天去预测了）
@@ -164,6 +163,8 @@ if __name__ == '__main__':
 
                 result = calc_metrics_for_curr_adm_v2(idx, logits, batch_01_labels, batch_d_seq_to_be_judged)
                 results.append(result)
+
+                print(f"{idx} / {len(test_dataset)} its", flush=True)
 
         results: pd.DataFrame = pd.concat(results)
         results.to_csv(os.path.join(args.path_dir_results, f"{ckpt_filename}.csv"))

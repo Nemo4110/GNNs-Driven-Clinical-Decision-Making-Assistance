@@ -4,15 +4,14 @@ import torch.nn.functional as F
 import torch
 
 from torch.nn.utils.rnn import pad_sequence
-from torch_geometric.data import HeteroData
 from torch_geometric.nn import to_hetero
-from typing import List, Tuple
+from typing import List
 from torch.utils.data.dataloader import DataLoader
 from dataset.hgs import DiscreteTimeHeteroGraph
 from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
-from utils.config import HeteroGraphConfig, MappingManager, GNNConfig
+from utils.config import HeteroGraphConfig, GNNConfig
 from utils.misc import sequence_mask
-from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode, MaskedBCEWithLogitsLoss
+from model.layers import LinksPredictor, SingelGnn
 
 
 class BackBoneV2(nn.Module):
