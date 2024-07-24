@@ -133,7 +133,7 @@ if __name__ == '__main__':
         if not os.path.exists(args.path_dir_model_hub):
             os.mkdir(args.path_dir_model_hub)
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub,
-                                                    f"loss_{loss.sum(-1).mean().item():.4f}_"
+                                                    f"loss_{loss.item() / args.batch_size:.4f}_"
                                                     f"{model.__class__.__name__}_"
                                                     f"goal_{args.goal}.pt"))
 
