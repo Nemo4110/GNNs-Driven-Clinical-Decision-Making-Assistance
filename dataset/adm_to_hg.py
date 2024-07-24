@@ -6,7 +6,7 @@ import utils.config as conf
 from torch_geometric.utils import negative_sampling
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Dataset
-from utils.config import MappingManager
+from utils.config import MappingManager, neg_sample_strategy
 from dataset.hgs import DiscreteTimeHeteroGraph
 
 
@@ -102,6 +102,7 @@ def collect_hgs(batch):
 
     B = len(batch)   # batch shape: [B, ?], ?表示每个患者住院天数不一
     d_vocab_size = MappingManager.node_type_to_node_num['drug']
+    l_vocab_size = MappingManager.node_type_to_node_num['labitem']
 
     adm_lens = [len(hgs) for hgs in batch_hgs]
 
@@ -113,71 +114,107 @@ def collect_hgs(batch):
         if a_l > max_adm_len:
             adm_lens[i] = max_adm_len
 
-    batch_d_seq = []
-    batch_d_neg = []
+    batch_d_seq, batch_d_neg = [], []
+    batch_l_seq, batch_l_neg = [], []
     for hgs in batch_hgs:
-        all_day_prs = []  # 收集当前住院过程每天的药物处方列表
-        all_day_neg = []  # 收集当前住院过程每天没有安排的药物处方列表（负样本）
+        all_day_d_seq, all_day_d_neg = [], []  # 收集当前住院过程每天的药物处方列表（正样本），没有安排的药物处方列表（负样本）
+        all_day_l_seq, all_day_l_neg = [], [] 
         for hg in hgs:  # 遍历每天的图
-            pos_indices = hg["admission", "took", "drug"].edge_index
-            neg_indices = neg_sample_for_cur_day(pos_indices, num_itm_nodes=d_vocab_size)
+            d_pos_indices = hg["admission", "took", "drug"].edge_index
+            l_pos_indices = hg["admission", "did", "labitem"].edge_index
+            
+            d_neg_indices = neg_sample_for_cur_day(d_pos_indices, num_itm_nodes=d_vocab_size, strategy=neg_sample_strategy)
+            l_neg_indices = neg_sample_for_cur_day(l_pos_indices, num_itm_nodes=l_vocab_size, strategy=neg_sample_strategy)
 
-            cur_day_prs = pos_indices[1, :].tolist()
-            cur_day_neg = neg_indices[1, :].tolist()
+            cur_day_d_seq = d_pos_indices[1, :].tolist()
+            cur_day_d_neg = d_neg_indices[1, :].tolist()
+            
+            cur_day_l_seq = l_pos_indices[1, :].tolist()
+            cur_day_l_neg = l_neg_indices[1, :].tolist()
 
-            all_day_prs.append(cur_day_prs)
-            all_day_neg.append(cur_day_neg)
+            all_day_d_seq.append(cur_day_d_seq)
+            all_day_d_neg.append(cur_day_d_neg)
+            
+            all_day_l_seq.append(cur_day_l_seq)
+            all_day_l_neg.append(cur_day_l_neg)
 
-        batch_d_seq.append(all_day_prs)
-        batch_d_neg.append(all_day_neg)
+        batch_d_seq.append(all_day_d_seq)
+        batch_d_neg.append(all_day_d_neg)
+        
+        batch_l_seq.append(all_day_l_seq)
+        batch_l_neg.append(all_day_l_neg)
 
-    return batch_hgs, batch_d_seq, batch_d_neg, adm_lens
+    return (batch_hgs, adm_lens,
+            batch_d_seq, batch_d_neg,
+            batch_l_seq, batch_l_neg) 
 
 
-def neg_sample_for_cur_day(pos_indices, num_itm_nodes: int,):
-    # TODO: 增加对不同采样策略的支持，目前暂时只支持2：1负正样本采样率
+def neg_sample_for_cur_day(pos_indices, num_itm_nodes: int, strategy: int = 2):
+    """
+    Args:
+        strategy: int
+            - 2: 2:1 (neg:pos)
+            - >=10 and < num_itm_nodes: sample `strategy` negative samples
+            - -1: full item set
+    """
     # 一张图里的病人结点固定为1个
     num_pos_edges = pos_indices.size(1)
-    num_neg_samples = 10 if num_pos_edges == 0 else num_pos_edges * 2  # 保证最少有10个负样本
+
+    if num_pos_edges == 0:  # 若当前天没有正样本
+        num_neg_samples = 10  # 保证最少有10个负样本
+    else:
+        if strategy == 2:
+            num_neg_samples = num_pos_edges * 2
+        elif 10 <= strategy < num_itm_nodes:
+            num_neg_samples = strategy
+        elif strategy == -1:
+            num_neg_samples = num_itm_nodes
+        else:
+            raise f"invalid negative sample `strategy` args: {strategy}!"
+
     neg_indices = negative_sampling(pos_indices, (1, num_itm_nodes), num_neg_samples=num_neg_samples)
+
     return neg_indices
 
 
-def get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg, device=torch.device('cpu')):
+def get_batch_seq_to_be_judged_and_01_labels(batch_pos_seq, batch_neg_seq, device=torch.device('cpu')):
     # 使用正负样本构造[0,1] labels
-    batch_pos_labels = [d_seq[1:] for d_seq in batch_d_seq]  # 排除第一天
-    batch_neg_labels = [d_neg[1:] for d_neg in batch_d_neg]
+    batch_pos_labels = [pos_seq[1:] for pos_seq in batch_pos_seq]  # 排除第一天
+    batch_neg_labels = [neg_seq[1:] for neg_seq in batch_neg_seq]
 
-    batch_d_seq_to_be_judged = []
+    batch_seq_to_be_judged = []
     batch_01_labels = []
     for i, (pos_labels, neg_labels) in enumerate(zip(batch_pos_labels, batch_neg_labels)):  # 遍历病人
-        all_day_d_seq_to_be_judged = []
+        all_day_seq_to_be_judged = []
         all_day_01_labels = []
         for j, (cur_day_pos, cur_day_neg) in enumerate(zip(pos_labels, neg_labels)):  # 遍历每天
-            # *** 将上一天安排的药物加入当前天的评估队列中 ***
+            # *** 将上一天安排的药物/检验项目加入当前天的评估队列中 ***
             # 这里的j表示扣除第一天的序列中的天，实际上的表示j + 1天
-            pre_day_pos = batch_d_seq[i][j]  # 因此这样就能获取到前一天的正样本
+            pre_day_pos = batch_pos_seq[i][j]  # 因此这样就能获取到前一天的正样本
             # 获取前一天正样本 与 当前天正样本 的差集，作为强负样本加入
             cur_pre_dec = list(set(pre_day_pos) - set(cur_day_pos))
 
+            # 将差集加入到当前天的负样本中，注意去重
+            cur_day_neg += cur_pre_dec
+            cur_day_neg = list(set(cur_day_neg))
+
             t_cur_day_pos = torch.tensor(cur_day_pos, dtype=torch.int)
             t_cur_day_neg = torch.tensor(cur_day_neg, dtype=torch.int)
-            t_cur_pre_dec = torch.tensor(cur_pre_dec, dtype=torch.int)
 
-            cur_day_d_seq_to_be_judged = torch.cat((t_cur_day_pos, t_cur_day_neg, t_cur_pre_dec))
+            cur_day_seq_to_be_judged = torch.cat((t_cur_day_pos, t_cur_day_neg))
             cur_day_01_labels = torch.cat((torch.ones(len(cur_day_pos)),
-                                           torch.zeros(len(cur_day_neg) + len(cur_pre_dec))))
+                                           torch.zeros(len(cur_day_neg))))
 
             # 打乱顺序
             index_shuffle = torch.randperm(cur_day_01_labels.size(0))
 
-            all_day_d_seq_to_be_judged.append(cur_day_d_seq_to_be_judged[index_shuffle].to(device))
+            all_day_seq_to_be_judged.append(cur_day_seq_to_be_judged[index_shuffle].to(device))
             all_day_01_labels.append(cur_day_01_labels[index_shuffle].to(device))
 
-        batch_d_seq_to_be_judged.append(all_day_d_seq_to_be_judged)
+        batch_seq_to_be_judged.append(all_day_seq_to_be_judged)
         batch_01_labels.append(all_day_01_labels)
 
-    return batch_d_seq_to_be_judged, batch_01_labels
+    return batch_seq_to_be_judged, batch_01_labels
 
 
 if __name__ == "__main__":
@@ -185,9 +222,13 @@ if __name__ == "__main__":
     test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collect_hgs, pin_memory=True)
 
     for batch in test_dataloader:
-        batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch
+        batch_hgs, adm_lens, \
+            batch_d_seq, batch_d_neg, \
+            batch_l_seq, batch_l_neg = batch
 
-        batch_d_seq_to_be_judged, batch_01_labels = \
-            get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+        batch_d_seq_to_be_judged, batch_d_01_labels = \
+            get_batch_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+        batch_l_seq_to_be_judged, batch_l_01_labels = \
+            get_batch_seq_to_be_judged_and_01_labels(batch_l_seq, batch_l_neg)
 
         break

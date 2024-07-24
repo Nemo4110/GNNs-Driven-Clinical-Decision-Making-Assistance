@@ -9,15 +9,31 @@ from torch_geometric.nn import to_hetero
 from typing import List, Tuple
 from torch.utils.data.dataloader import DataLoader
 from dataset.hgs import DiscreteTimeHeteroGraph
-from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
+from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_seq_to_be_judged_and_01_labels
 from utils.config import HeteroGraphConfig, MappingManager, GNNConfig
 from utils.misc import sequence_mask
 from model.layers import LinksPredictor, PositionalEncoding, SingelGnn, get_decoder_by_choice, decode, MaskedBCEWithLogitsLoss
 
 
 class BackBoneV2(nn.Module):
-    def __init__(self, h_dim: int, gnn_conf: GNNConfig, device, num_enc_layers: int = 6):
+    def __init__(self, goal: str, h_dim: int, gnn_conf: GNNConfig, device, num_enc_layers: int = 6):
+        """
+        Args:
+            goal:
+                预测目标，药物或检验项目
+            h_dim:
+                hidden dimension
+            gnn_conf:
+                GNN的配置
+            device:
+                在哪个设备上训练
+            num_enc_layers:
+                encoder 层数
+        """
         super().__init__()
+        assert goal in ["drug", "labitem"]
+        self.goal = goal
+
         self.h_dim = h_dim
         self.gnn_conf = gnn_conf
         self.device = device
@@ -55,10 +71,10 @@ class BackBoneV2(nn.Module):
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
 
         # Final links predictor
-        self.d_lp = LinksPredictor(self.h_dim)
+        self.lp = LinksPredictor(self.h_dim)
 
     def forward(self, batch_hgs,
-                batch_d_seq_to_be_judged: List[List[torch.tensor]],
+                batch_seq_to_be_judged: List[List[torch.tensor]],
                 batch_01_labels: List[List[torch.tensor]] = None):
         B = len(batch_hgs)
         adm_lens = [len(hgs) for hgs in batch_hgs]
@@ -104,13 +120,14 @@ class BackBoneV2(nn.Module):
         patients_condition = self.patient_condition_encoder(
             patients_condition, mask=subsequent_mask, src_key_padding_mask=padding_mask)  # (B, max_adm_len, h_dim)
 
-        # 目前先用对应天的患者病情表示 与 对应药物Embedding进行相乘 获取分数
+        # 目前先用对应天的患者病情表示 与 对应药物或检验项目的Embedding进行相乘 获取分数
         logits = []
         for i in range(B):
             cur_adm_logits: List[torch.tensor] = []
             for j in range(adm_lens[i]):  # 遍历住院天
                 cur_day_pc = patients_condition[i, j]  # 当前患者当前天的病情表示（使用之前天的信息）
-                cur_day_logits = self.d_lp(cur_day_pc, self.d_emb(batch_d_seq_to_be_judged[i][j]))
+                cur_day_seq_emb = self.nid_emb[self.goal](batch_seq_to_be_judged[i][j])
+                cur_day_logits = self.lp(cur_day_pc, cur_day_seq_emb)
                 cur_adm_logits.append(cur_day_logits)
             logits.append(cur_adm_logits)
 
@@ -137,15 +154,21 @@ if __name__ == "__main__":
 
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-    model = BackBoneV2(64, gnn_conf, torch.device('cpu'))
+    model = BackBoneV2("labitem", 64, gnn_conf, torch.device('cpu'))
 
     for batch in test_dataloader:
-        batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch
+        batch_hgs, adm_lens, \
+            batch_d_seq, batch_d_neg, \
+            batch_l_seq, batch_l_neg = batch
 
         # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
         input_hgs = [hgs[:-1] for hgs in batch_hgs]
 
-        batch_d_seq_to_be_judged, batch_01_labels = \
-            get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+        if model.goal == "drug":
+            batch_seq_to_be_judged, batch_01_labels = \
+                get_batch_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+        elif model.goal == "labitem":
+            batch_seq_to_be_judged, batch_01_labels = \
+                get_batch_seq_to_be_judged_and_01_labels(batch_l_seq, batch_l_neg)
 
-        logits, loss = model(input_hgs, batch_d_seq_to_be_judged, batch_01_labels)
+        logits, loss = model(input_hgs, batch_seq_to_be_judged, batch_01_labels)

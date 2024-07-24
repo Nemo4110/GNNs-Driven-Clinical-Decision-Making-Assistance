@@ -49,6 +49,7 @@ class HeteroGraphConfig:
 
 max_seq_length = 150
 max_adm_length = 50
+neg_sample_strategy = 2  # 默认使用2：1负采样策略
 
 
 @dataclass

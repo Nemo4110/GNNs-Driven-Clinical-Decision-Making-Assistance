@@ -1,20 +1,8 @@
 import torch
-import torch.nn.functional as F
 import os
 import glob
 
 from typing import List, Dict, Tuple
-
-
-def calc_loss(dict_every_day_pred, node_types: List[str], device, loss_f):
-    loss = torch.tensor(0.0).to(device)
-    for node_type in node_types:
-        if node_type == "admission":
-            continue
-        for scores, labels in zip(dict_every_day_pred[node_type]["scores"],
-                                    dict_every_day_pred[node_type]["labels"]):
-            loss += loss_f(scores, labels)
-    return loss
 
 
 def sequence_mask(sequence: torch.tensor, valid_len: torch.tensor):
