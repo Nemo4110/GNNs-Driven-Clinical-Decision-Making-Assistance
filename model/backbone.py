@@ -126,7 +126,7 @@ class BackBoneV2(nn.Module):
             cur_adm_logits: List[torch.tensor] = []
             for j in range(adm_lens[i]):  # 遍历住院天
                 cur_day_pc = patients_condition[i, j]  # 当前患者当前天的病情表示（使用之前天的信息）
-                cur_day_seq_emb = self.nid_emb[self.goal](batch_seq_to_be_judged[i][j])
+                cur_day_seq_emb = self.nid_emb[self.goal](batch_seq_to_be_judged[i][j].to(self.device))
                 cur_day_logits = self.lp(cur_day_pc, cur_day_seq_emb)
                 cur_adm_logits.append(cur_day_logits)
             logits.append(cur_adm_logits)
@@ -141,8 +141,8 @@ class BackBoneV2(nn.Module):
     def get_loss(self, logits, batch_01_labels):
         total_loss = torch.tensor(0.0).to(self.device)
         for cur_adm_logits, cur_adm_labels in zip(logits, batch_01_labels):
-            t_cur_adm_logits = torch.cat(cur_adm_logits)
-            t_cur_adm_labels = torch.cat(cur_adm_labels)
+            t_cur_adm_logits = torch.cat(cur_adm_logits).to(self.device)
+            t_cur_adm_labels = torch.cat(cur_adm_labels).to(self.device)
             cur_adm_loss = F.binary_cross_entropy_with_logits(t_cur_adm_logits, t_cur_adm_labels)
             total_loss += cur_adm_loss
         return total_loss  # 当前批次的总loss
