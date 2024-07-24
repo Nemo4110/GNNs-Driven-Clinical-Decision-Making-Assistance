@@ -1,17 +1,16 @@
 import argparse
 import os
+import pickle
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import utils.constant as constant
 
 from torch.utils.data.dataloader import DataLoader
 
-from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_d_seq_to_be_judged_and_01_labels
+from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_seq_to_be_judged_and_01_labels
 from model.backbone import BackBoneV2
 from utils.best_thresholds import BestThresholdLoggerV2
-from utils.misc import get_latest_model_ckpt
+from utils.misc import get_latest_model_ckpt, get_latest_threshold
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import calc_metrics_for_curr_adm_v2
 from typing import List
@@ -44,7 +43,7 @@ if __name__ == '__main__':
     parser.add_argument("--path_dir_thresholds",default=r"./thresholds",                    help="path where thresholds save")
 
     # Experiment settings
-    parser.add_argument("--task",                                   default="MIX",     help="the goal of the recommended task, in ['MIX', 'drug', 'labitem']")
+    parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
     parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False)
 
@@ -59,7 +58,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-    print(f"using device: {str(device)}")
     # 数据集位置
 
     # Heterogeneous graph config
@@ -71,7 +69,7 @@ if __name__ == '__main__':
 
     # model
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-    model = BackBoneV2(args.hidden_dim, gnn_conf, device, args.num_encoder_layers).to(device)
+    model = BackBoneV2(args.goal, args.hidden_dim, gnn_conf, device, args.num_encoder_layers).to(device)
 
     # --- train ---
     if args.train:
@@ -79,9 +77,10 @@ if __name__ == '__main__':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
         # BestThresholdLogger
-        if not os.path.exists(args.path_dir_thresholds):
-            os.mkdir(args.path_dir_thresholds)
-        bth_logger = BestThresholdLoggerV2(args.path_dir_thresholds)
+        path_dir_thresholds = os.path.join(args.path_dir_thresholds, args.goal)
+        if not os.path.exists(path_dir_thresholds):
+            os.mkdir(path_dir_thresholds)
+        bth_logger = BestThresholdLoggerV2(path_dir_thresholds)
 
         train_dataset = OneAdmOneHetero(args.root_path_dataset, "train")
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
@@ -90,7 +89,11 @@ if __name__ == '__main__':
         for epoch in range(args.epochs):
             if args.use_gpu:
                 torch.cuda.empty_cache()
-            for batch_hgs, batch_d_seq, batch_d_neg, adm_lens in train_dataloader:
+            for batch in train_dataloader:
+                batch_hgs, adm_lens, \
+                    batch_d_seq, batch_d_neg, \
+                    batch_l_seq, batch_l_neg = batch
+
                 # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]
 
@@ -98,10 +101,14 @@ if __name__ == '__main__':
                 for i, hgs in enumerate(input_hgs):
                     input_hgs[i] = [hg.to(device) for hg in hgs]
 
-                batch_d_seq_to_be_judged, batch_01_labels = \
-                    get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg, device)
+                if model.goal == "drug":
+                    batch_seq_to_be_judged, batch_01_labels = \
+                        get_batch_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+                elif model.goal == "labitem":
+                    batch_seq_to_be_judged, batch_01_labels = \
+                        get_batch_seq_to_be_judged_and_01_labels(batch_l_seq, batch_l_neg)
 
-                logits, loss = model(input_hgs, batch_d_seq_to_be_judged, batch_01_labels)
+                logits, loss = model(input_hgs, batch_seq_to_be_judged, batch_01_labels)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -111,7 +118,7 @@ if __name__ == '__main__':
                 with torch.no_grad():
                     # at last epoch, log the best_threshold
                     if epoch == (args.epochs - 1):
-                        can_prd_days = [_ - 1 for _ in adm_lens]  # 能预测的天数为总的住院时长减去第一天
+                        can_prd_days = [adm_len - 1 for adm_len in adm_lens]  # 能预测的天数为总的住院时长减去第一天
                         # 注意！这里传给最佳阈值计算函数的logits需要sigmoid()，
                         # 原因见：https://pytorch.org/docs/1.12/generated/torch.nn.BCEWithLogitsLoss.html#torch.nn.BCEWithLogitsLoss
                         bth_logger.log_cur_batch(logits, batch_01_labels, can_prd_days)
@@ -124,7 +131,9 @@ if __name__ == '__main__':
         if not os.path.exists(args.path_dir_model_hub):
             os.mkdir(args.path_dir_model_hub)
         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub,
-                                                    f"loss_{loss.sum(-1).mean().item():.4f}_{model.__class__.__name__}.pt"))
+                                                    f"loss_{loss.item() / args.batch_size:.4f}_"
+                                                    f"{model.__class__.__name__}_"
+                                                    f"goal_{args.goal}.pt"))
 
     # --- test ---
     if args.test:
@@ -144,11 +153,19 @@ if __name__ == '__main__':
             sd = torch.load(sd_path, map_location=device)
             model.load_state_dict(sd)
 
+        # get best threshold
+        bth_path = os.path.join(args.path_dir_thresholds, args.goal)
+        bth_filename = get_latest_threshold(bth_path)
+        with open(os.path.join(bth_path, bth_filename), 'rb') as f:
+            best_thresholds_by_days = pickle.load(f)
+
         model.eval()
         with torch.no_grad():
             results: List[pd.DataFrame] = []
             for idx, (batch_data) in enumerate(test_dataloader):
-                batch_hgs, batch_d_seq, batch_d_neg, adm_lens = batch_data
+                batch_hgs, adm_lens, \
+                    batch_d_seq, batch_d_neg, \
+                    batch_l_seq, batch_l_neg = batch_data
 
                 input_hgs = [hgs[:-1] for hgs in batch_hgs]  # 输入模型的数据不包括最后一天（因为没有下一天去预测了）
 
@@ -156,12 +173,16 @@ if __name__ == '__main__':
                 for i, hgs in enumerate(input_hgs):
                     input_hgs[i] = [hg.to(device) for hg in hgs]
 
-                batch_d_seq_to_be_judged, batch_01_labels = \
-                    get_batch_d_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg, device)
+                if model.goal == "drug":
+                    batch_seq_to_be_judged, batch_01_labels = \
+                        get_batch_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
+                elif model.goal == "labitem":
+                    batch_seq_to_be_judged, batch_01_labels = \
+                        get_batch_seq_to_be_judged_and_01_labels(batch_l_seq, batch_l_neg)
 
-                logits = model(input_hgs, batch_d_seq_to_be_judged, None)  # 生成了此患者从第二天开始的药物集合预测
+                logits = model(input_hgs, batch_seq_to_be_judged, None)  # 生成了此患者从第二天开始的药物集合预测
 
-                result = calc_metrics_for_curr_adm_v2(idx, logits, batch_01_labels, batch_d_seq_to_be_judged)
+                result = calc_metrics_for_curr_adm_v2(idx, logits, batch_01_labels, batch_seq_to_be_judged, best_thresholds_by_days)
                 results.append(result)
 
                 print(f"{idx} / {len(test_dataset)} its", flush=True)

@@ -17,18 +17,12 @@ from sklearn.metrics import \
     precision_recall_curve, \
     average_precision_score
 from utils.ddi import DDICalculator
-from utils.constant import bth_path
-from utils.misc import get_latest_threshold
 from typing import List
 from deprecated import deprecated
 
 
 sys.path.append('..')
 ddi_calculator = DDICalculator()
-
-bth_filename = get_latest_threshold(bth_path)
-with open(os.path.join(bth_path, bth_filename), 'rb') as f:
-    best_thresholds_by_days = pickle.load(f)
 
 
 def flat_indices_to_voc_size(indices: List[int], voc_size, exclude_indices=None) -> np.ndarray:
@@ -173,9 +167,10 @@ def calc_metrics_for_curr_adm(
 
 
 def calc_metrics_for_curr_adm_v2(
-    idx, all_day_logits, all_day_labels, batch_d_seq_to_be_judged,
+    idx, all_day_logits, all_day_labels, batch_d_seq_to_be_judged, best_thresholds_by_days,
     metric_functions=(rocauc, prauc, accuracy, jaccard, precision, recall, ddi_preds, ddi_trues)
 ):
+
     # 适配当前取值范围[0,1]
     result = pd.DataFrame(columns=['id', 'day'] + [mf.__name__ for mf in metric_functions])
 
