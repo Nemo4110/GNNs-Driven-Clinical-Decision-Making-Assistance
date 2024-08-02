@@ -508,7 +508,7 @@ class BaseEmbeddingLayer(nn.Module):
 class ContextEmbeddingLayer(BaseEmbeddingLayer):
     def __init__(self, config, dataset):
         super(ContextEmbeddingLayer, self).__init__(config, dataset)
-        self.double_tower = config["double_tower"]
+        self.double_tower = config.get("double_tower", None)
         if self.double_tower is None:
             self.double_tower = False
 
