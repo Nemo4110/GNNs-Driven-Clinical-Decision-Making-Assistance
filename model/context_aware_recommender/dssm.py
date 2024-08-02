@@ -73,24 +73,3 @@ class DSSM(ContextRecommender):
 
     def predict(self, interaction):
         return self.sigmoid(self.forward(interaction))
-
-
-if __name__ == '__main__':
-    config = {
-        "mlp_hidden_size": [256, 64, 32],
-        "dropout_prob": 0.1,
-        "embedding_size": 32,
-        "double_tower": True,
-        "device": torch.device('cpu'),
-        "LABEL_FIELD": "label",
-    }
-
-    sources_dfs = SourceDataFrames(r"..\..\data\mimic-iii-clinical-database-1.4")
-    dataset = SingleItemType(sources_dfs, "val", "labitem")
-
-    config["numerical_features"] = dataset.fields(ftype=[FeatureType.FLOAT])
-
-    net = DSSM(config, dataset)
-    loss = net.calculate_loss(dataset[2])
-    print(loss)
-
