@@ -15,7 +15,7 @@ class OneAdmOneHetero(Dataset):
     def __init__(self, path, split) -> None:
         super().__init__()
         assert os.path.exists(path)
-        assert split in ("train", "test")
+        assert split in ("train", "test", "val")
 
         self.path = os.path.join(path, split)
 

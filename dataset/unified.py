@@ -1,0 +1,637 @@
+"""加载原始DF数据，后续转换成各种类型的数据都从这里走"""
+import sys; sys.path.append("..")
+import pandas as pd
+import os
+import torch
+import random
+import utils.constant as constant
+
+from torch_geometric.data import HeteroData
+from torch.utils.data import Dataset
+from sklearn.model_selection import train_test_split
+from utils.enum_type import FeatureType, FeatureSource
+from typing import List, Dict
+
+
+# 各个表的特征列
+list_selected_admission_columns = [
+    'ADMISSION_TYPE',
+    'ADMISSION_LOCATION',
+    'DISCHARGE_LOCATION',
+    'INSURANCE',
+    'LANGUAGE',
+    'RELIGION',
+    'MARITAL_STATUS',
+    'ETHNICITY'
+]
+list_selected_labitems_columns = ['FLUID', 'CATEGORY']
+list_selected_drug_ndc_columns = [
+    "DRUG_TYPE_MAIN_Proportion",
+    "DRUG_TYPE_BASE_Proportion",
+    "DRUG_TYPE_ADDITIVE_Proportion",
+    "FORM_UNIT_DISP_Freq_1",
+    "FORM_UNIT_DISP_Freq_2",
+    "FORM_UNIT_DISP_Freq_3",
+    "FORM_UNIT_DISP_Freq_4",
+    "FORM_UNIT_DISP_Freq_5"
+]
+list_selected_prescriptions_columns = [
+    "DRUG_TYPE",
+    "PROD_STRENGTH",
+    "DOSE_VAL_RX",
+    "DOSE_UNIT_RX",
+    "FORM_VAL_DISP",
+    "FORM_UNIT_DISP",
+    "ROUTE"
+]
+list_selected_labevents_columns = ['CATAGORY', 'VALUENUM_Z-SCORED']
+
+
+# 上面每个特征列的名称都是唯一的，因此可以全局一个字段，映射特征列名称到相应特征类型
+field2type = {
+    'item_id': FeatureType.TOKEN,
+    'user_id': FeatureType.TOKEN,
+
+    # user id
+    'HADM_ID': FeatureType.TOKEN,
+
+    # item id
+    'NDC': FeatureType.TOKEN,
+    'ITEMID': FeatureType.TOKEN,
+    
+    # 患者(user)住院信息
+    'ADMISSION_TYPE':     FeatureType.TOKEN,
+    'ADMISSION_LOCATION': FeatureType.TOKEN,
+    'DISCHARGE_LOCATION': FeatureType.TOKEN,
+    'INSURANCE':      FeatureType.TOKEN,
+    'LANGUAGE':       FeatureType.TOKEN,
+    'RELIGION':       FeatureType.TOKEN,
+    'MARITAL_STATUS': FeatureType.TOKEN,
+    'ETHNICITY':      FeatureType.TOKEN,
+
+    # 检验item
+    'FLUID': FeatureType.TOKEN,
+    'CATEGORY': FeatureType.TOKEN,
+
+    # 药品item
+    'DRUG_TYPE_MAIN_Proportion': FeatureType.FLOAT,
+    'DRUG_TYPE_BASE_Proportion': FeatureType.FLOAT,
+    'DRUG_TYPE_ADDITIVE_Proportion': FeatureType.FLOAT,
+    'FORM_UNIT_DISP_Freq_1': FeatureType.TOKEN,
+    'FORM_UNIT_DISP_Freq_2': FeatureType.TOKEN,
+    'FORM_UNIT_DISP_Freq_3': FeatureType.TOKEN,
+    'FORM_UNIT_DISP_Freq_4': FeatureType.TOKEN,
+    'FORM_UNIT_DISP_Freq_5': FeatureType.TOKEN,
+
+    # 患者-检验项目 interaction
+    'CATAGORY':          FeatureType.TOKEN,
+    'VALUENUM_Z-SCORED': FeatureType.FLOAT,
+
+    # 患者-药品 interaction
+    'DRUG_TYPE':      FeatureType.TOKEN,
+    'PROD_STRENGTH':  FeatureType.TOKEN,
+    'DOSE_VAL_RX':    FeatureType.TOKEN,
+    'DOSE_UNIT_RX':   FeatureType.TOKEN,
+    'FORM_VAL_DISP':  FeatureType.TOKEN,
+    'FORM_UNIT_DISP': FeatureType.TOKEN,
+    'ROUTE':          FeatureType.TOKEN
+}
+
+field2source = {
+    'user_id': FeatureSource.USER_ID,
+    'item_id': FeatureSource.ITEM_ID,
+
+    # user id
+    'HADM_ID': FeatureSource.USER_ID,
+
+    # item id
+    'NDC': FeatureSource.ITEM_ID,
+    'ITEMID': FeatureSource.ITEM_ID,
+
+
+    # 患者(user)住院信息
+    'ADMISSION_TYPE':     FeatureSource.USER,
+    'ADMISSION_LOCATION': FeatureSource.USER,
+    'DISCHARGE_LOCATION': FeatureSource.USER,
+    'INSURANCE':      FeatureSource.USER,
+    'LANGUAGE':       FeatureSource.USER,
+    'RELIGION':       FeatureSource.USER,
+    'MARITAL_STATUS': FeatureSource.USER,
+    'ETHNICITY':      FeatureSource.USER,
+
+    # 检验item
+    'FLUID': FeatureSource.ITEM,
+    'CATEGORY': FeatureSource.ITEM,
+
+    # 药品item
+    'DRUG_TYPE_MAIN_Proportion': FeatureSource.ITEM,
+    'DRUG_TYPE_BASE_Proportion': FeatureSource.ITEM,
+    'DRUG_TYPE_ADDITIVE_Proportion': FeatureSource.ITEM,
+    'FORM_UNIT_DISP_Freq_1': FeatureSource.ITEM,
+    'FORM_UNIT_DISP_Freq_2': FeatureSource.ITEM,
+    'FORM_UNIT_DISP_Freq_3': FeatureSource.ITEM,
+    'FORM_UNIT_DISP_Freq_4': FeatureSource.ITEM,
+    'FORM_UNIT_DISP_Freq_5': FeatureSource.ITEM,
+
+    # 患者-检验项目 interaction
+    'CATAGORY':          FeatureSource.INTERACTION,
+    'VALUENUM_Z-SCORED': FeatureSource.INTERACTION,
+
+    # 患者-药品 interaction
+    'DRUG_TYPE':      FeatureSource.INTERACTION,
+    'PROD_STRENGTH':  FeatureSource.INTERACTION,
+    'DOSE_VAL_RX':    FeatureSource.INTERACTION,
+    'DOSE_UNIT_RX':   FeatureSource.INTERACTION,
+    'FORM_VAL_DISP':  FeatureSource.INTERACTION,
+    'FORM_UNIT_DISP': FeatureSource.INTERACTION,
+    'ROUTE':          FeatureSource.INTERACTION
+}
+
+field2dtype = {
+    "HADM_ID": 'int64',
+    "ITEMID":  'int64',
+
+    # df_admissions
+    'ADMISSION_TYPE':     'int64',
+    'ADMISSION_LOCATION': 'int64',
+    'DISCHARGE_LOCATION': 'int64',
+    'INSURANCE':          'int64',
+    'LANGUAGE':           'int64',
+    'RELIGION':           'int64',
+    'MARITAL_STATUS':     'int64',
+    'ETHNICITY':          'int64',
+
+    # df_labitems
+    'LABEL':    'string',
+    'FLUID':    'int64',
+    'CATEGORY': 'int64',
+
+    # df_labevents
+    'CATAGORY':          'int64',
+    'VALUENUM_Z-SCORED': 'float64',
+    'TIMESTEP':          'int64',
+
+    # df_prescriptions
+    'DRUG':              'string',
+    'DRUG_NAME_POE':     'string',
+    'DRUG_NAME_GENERIC': 'string',
+    'FORMULARY_DRUG_CD': 'string',
+    'GSN':               'string',
+    'NDC':               'int64',
+    'DRUG_TYPE':         'int64',
+    'PROD_STRENGTH':     'int64',
+    'DOSE_VAL_RX':       'int64',
+    'DOSE_UNIT_RX':      'int64',
+    'FORM_VAL_DISP':     'int64',
+    'FORM_UNIT_DISP':    'int64',
+    'ROUTE':             'int64'
+
+}
+
+
+class SourceDataFrames:
+    def __init__(self, path_etl_output: str = constant.PATH_MIMIC_III_ETL_OUTPUT):
+        self.path_etl_output = path_etl_output
+
+        # 读取etl处理后的数据
+        print(">" + "-" * 43)
+        print("> loading .csv files...")
+        self.df_admissions    = pd.read_csv(os.path.join(self.path_etl_output, "ADMISSIONS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
+        self.df_labitems      = pd.read_csv(os.path.join(self.path_etl_output, "D_LABITEMS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
+        self.df_labevents     = pd.read_csv(os.path.join(self.path_etl_output, "LABEVENTS_PREPROCESSED.csv.gz"),     index_col=0, dtype=field2dtype)
+        self.df_prescriptions = pd.read_csv(os.path.join(self.path_etl_output, "PRESCRIPTIONS_PREPROCESSED.csv.gz"), index_col=0, dtype=field2dtype)
+        self.df_drug_ndc_feat = pd.read_csv(os.path.join(self.path_etl_output, "DRUGS_NDC_FEAT.csv.gz"),             index_col=0, dtype=field2dtype)
+        print("> finish loading!")
+
+        self.df_admissions.sort_values(by='HADM_ID', inplace=True)
+        self.df_labitems.sort_values(by='ITEMID', inplace=True)
+        self.df_drug_ndc_feat.sort_values(by='NDC', inplace=True)
+
+        self.adm_both = self._filter_out_adm_len_lt_2()
+        self.adm_train, self.adm_val, self.adm_test = self._train_val_test_split()
+
+        # groupby hadm_id
+        self.g_admi = self.df_admissions.groupby('HADM_ID')
+        self.g_labe = self.df_labevents.groupby('HADM_ID')
+        self.g_pres = self.df_prescriptions.groupby('HADM_ID')
+
+        self.field2type = field2type
+        self.field2source = field2source
+        self.tokenfields2mappedid = self._prepare_mapping_for_token_type_fields()
+
+        # user&item的特征 (注：因为上面排序过，因此每行直接对应新map之后的id)
+        # 在预处理时，统一用0填充了nan，因此实际值从1开始
+        # 对于token类型的特征列，需要用tokenfields2mappedid转换为最终映射mappedID
+        for field in list_selected_admission_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                self.df_admissions[field] = self._map_token_field_to_mapped_id(field, self.df_admissions)
+        for field in list_selected_labitems_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                self.df_labitems[field] = self._map_token_field_to_mapped_id(field, self.df_labitems)
+        for field in list_selected_drug_ndc_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                self.df_drug_ndc_feat[field] = self._map_token_field_to_mapped_id(field, self.df_drug_ndc_feat)
+
+        self.feat_admis = torch.from_numpy(self.df_admissions[list_selected_admission_columns].values)
+        self.feat_items = torch.from_numpy(self.df_labitems[list_selected_labitems_columns].values)
+        self.feat_drugs = torch.from_numpy(self.df_drug_ndc_feat[list_selected_drug_ndc_columns].values)
+
+        print(">" + "-" * 43 + "\n")
+
+    def _filter_out_adm_len_lt_2(self):
+        """过滤掉住院长度小于2的HADM_ID"""
+        length_per_hadm_l = self.df_labevents.groupby('HADM_ID')[['TIMESTEP']].max()
+        length_per_hadm_p = self.df_prescriptions.groupby('HADM_ID')[['TIMESTEP']].max()
+        length_per_hadm_l_multidays = length_per_hadm_l[length_per_hadm_l.TIMESTEP >= 1]
+        length_per_hadm_p_multidays = length_per_hadm_p[length_per_hadm_p.TIMESTEP >= 1]
+
+        adm_l = set(list(length_per_hadm_l_multidays.index))
+        adm_p = set(list(length_per_hadm_p_multidays.index))
+
+        both = list(set.intersection(adm_l, adm_p))
+        both = list(map(int, both))
+        print(f"> total adm whose length >1: {len(both)}")
+
+        return both
+
+    def _train_val_test_split(self):
+        adm_train_val, adm_test = train_test_split(self.adm_both, test_size=0.1, random_state=10043)
+        adm_train, adm_val = train_test_split(adm_train_val, test_size=1. / 36, random_state=10043)
+        print(f"> total adm for training: {len(adm_train)}, "
+              f"validating: {len(adm_val)}, "
+              f"testing: {len(adm_test)}")
+        return adm_train, adm_val, adm_test
+    
+    def _prepare_mapping_for_token_type_fields(self):
+        """为所有 token类型 的 特征列 生成从0开始的映射"""
+        tokenfields2mappedid = {}
+        
+        # admission
+        for field in list_selected_admission_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                tokenfields2mappedid[field] = self._get_id_map_for_token_field(field, self.df_admissions)
+
+        # lab items
+        for field in list_selected_labitems_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                tokenfields2mappedid[field] = self._get_id_map_for_token_field(field, self.df_labitems)
+
+        # drug items
+        for field in list_selected_drug_ndc_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                tokenfields2mappedid[field] = self._get_id_map_for_token_field(field, self.df_drug_ndc_feat)
+
+        # lab events
+        for field in list_selected_labevents_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                tokenfields2mappedid[field] = self._get_id_map_for_token_field(field, self.df_labevents)
+
+        # prescriptions
+        for field in list_selected_prescriptions_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                tokenfields2mappedid[field] = self._get_id_map_for_token_field(field, self.df_prescriptions)
+
+        # 将物品（实验室检验项目、药物）的原始id映射到从0开始
+        unique_hadm_id = self.df_admissions.HADM_ID.sort_values().unique()
+        unique_item_id = self.df_labitems.ITEMID.sort_values().unique()
+        unique_ndc_id = self.df_drug_ndc_feat.NDC.sort_values().unique()
+        self.hadmid2mappedip = pd.DataFrame(data={'HADM_ID': unique_hadm_id, 'mappedID': pd.RangeIndex(len(unique_hadm_id))})
+        self.itemid2mappedid = pd.DataFrame(data={ 'ITEMID': unique_item_id, 'mappedID': pd.RangeIndex(len(unique_item_id))})
+        self.drugid2mappedid = pd.DataFrame(data={    'NDC': unique_ndc_id,  'mappedID': pd.RangeIndex(len(unique_ndc_id))})
+        tokenfields2mappedid['HADM_ID'] = self.hadmid2mappedip
+        tokenfields2mappedid['ITEMID'] = self.itemid2mappedid
+        tokenfields2mappedid['NDC'] = self.drugid2mappedid
+
+        return tokenfields2mappedid
+
+    def _get_id_map_for_token_field(self, token_field, source_df):
+        unique_tokens = source_df[token_field].sort_values().unique()
+        return pd.DataFrame(data={f'{token_field}': unique_tokens,
+                                  'mappedID': pd.RangeIndex(len(unique_tokens))})
+
+    def _map_token_field_to_mapped_id(self, token_field: str, ori_df: pd.DataFrame):
+        assert self.field2type[token_field] == FeatureType.TOKEN
+        map_df = self.tokenfields2mappedid[token_field]
+        map_sr = pd.Series(map_df['mappedID'].values, index=map_df[token_field].values)
+        return ori_df[token_field].map(map_sr)
+
+    def get_mapped_id(self, id_filed, src_id):
+        assert self.field2source[id_filed] in [FeatureSource.USER_ID, FeatureSource.ITEM_ID]
+        map_df = self.tokenfields2mappedid[id_filed]
+        mapped_id = map_df[map_df[id_filed] == src_id].mappedID.values[0]
+        return mapped_id
+
+
+class OneAdm(Dataset):
+    """
+    得到表示一次住院过程的DataFrames，
+    后续各种模型需要的数据集，继承这个类，然后写自己的转换器adaptor；
+    P.S. 其实只要重写__getitem__方法就好
+    """
+    def __init__(self, source_dfs: SourceDataFrames, split):
+        super().__init__()
+
+        assert split in ("train", "test", "val")
+        self.source_dfs = source_dfs
+
+        if split == "train":
+            self.admissions = self.source_dfs.adm_train
+        elif split == "val":
+            self.admissions = self.source_dfs.adm_val
+        else:
+            self.admissions = self.source_dfs.adm_test
+
+    def __getitem__(self, idx):
+        # id = self.admissions[idx]
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.admissions)
+
+
+class OneAdmOneHG(OneAdm):
+    """将单次住院过程表示为一张异质图"""
+    def __getitem__(self, idx):
+        id = self.admissions[idx]
+        return self._convert_to_hetero_graph(id)
+
+    def _convert_to_hetero_graph(self, id):
+        curr_id_df_admi = self.source_dfs.g_admi.get_group(id)
+        curr_id_df_labe = self.source_dfs.g_labe.get_group(id)
+        curr_id_df_pres = self.source_dfs.g_pres.get_group(id)
+
+        curr_id_df_labe = curr_id_df_labe.sort_values(by=["TIMESTEP", "CHARTTIME", "ROW_ID"])
+        curr_id_df_pres = curr_id_df_pres.sort_values(by=["TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"])
+
+        # --- get corr tensor shards ---
+        # nodes
+        mapped_id = self.source_dfs.get_mapped_id('HADM_ID', id)
+        nf_curr_adm = self.source_dfs.feat_admis[mapped_id]
+
+        nf_items = self.source_dfs.feat_items
+        nf_drugs = self.source_dfs.feat_drugs
+
+        # edges
+        ## Edge indexes
+        unique_hadm_id = curr_id_df_admi.HADM_ID.sort_values().unique()
+        unique_hadm_id = pd.DataFrame(data={
+            'HADM_ID': unique_hadm_id,
+            'mappedID': pd.RangeIndex(len(unique_hadm_id)),
+        })
+        ### Perform merge to obtain the edges from HADM_ID and ITEMID:
+        unique_item_id = self.source_dfs.itemid2mappedid
+        unique_ndc_id = self.source_dfs.drugid2mappedid
+
+        ratings_hadm_id = pd.merge(
+            curr_id_df_labe['HADM_ID'], unique_hadm_id, left_on='HADM_ID', right_on='HADM_ID', how='left')
+        ratings_item_id = pd.merge(
+            curr_id_df_labe['ITEMID'], unique_item_id, left_on='ITEMID', right_on='ITEMID', how='left')
+
+        ratings_hadm_id_drug = pd.merge(
+            curr_id_df_pres['HADM_ID'], unique_hadm_id, left_on='HADM_ID', right_on='HADM_ID', how='left')
+        ratings_ndc_id = pd.merge(
+            curr_id_df_pres['NDC'], unique_ndc_id, left_on='NDC', right_on='NDC', how='left')
+
+        ratings_hadm_id_items = torch.from_numpy(ratings_hadm_id['mappedID'].values)
+        ratings_hadm_id_drugs = torch.from_numpy(ratings_hadm_id_drug['mappedID'].values)
+        ratings_item_id = torch.from_numpy(ratings_item_id['mappedID'].values)
+        ratings_drug_id = torch.from_numpy(ratings_ndc_id['mappedID'].values)
+
+        edge_index_hadm_to_item = torch.stack([ratings_hadm_id_items, ratings_item_id], dim=0)
+        edge_index_hadm_to_drug = torch.stack([ratings_hadm_id_drugs, ratings_drug_id], dim=0)
+
+        ## Edge features
+        ef_items = torch.from_numpy(
+            curr_id_df_labe[list_selected_labevents_columns].values)
+        ef_drugs = torch.from_numpy(
+            curr_id_df_pres[list_selected_prescriptions_columns].values)
+        edges_timestep_items = torch.from_numpy(curr_id_df_labe['TIMESTEP'].values)
+        edges_timestep_drugs = torch.from_numpy(curr_id_df_pres['TIMESTEP'].values)
+
+        ### assemble ####
+
+        hetero_graph = HeteroData()
+        ## Node
+        ### node indices
+        hetero_graph["admission"].node_id = torch.arange(len(unique_hadm_id))
+        hetero_graph["labitem"  ].node_id = torch.arange(len(unique_item_id))
+        hetero_graph["drug"     ].node_id = torch.arange(len(unique_ndc_id))
+        ### node features:
+        hetero_graph["admission"].x = nf_curr_adm
+        hetero_graph["labitem"  ].x = nf_items
+        hetero_graph["drug"     ].x = nf_drugs
+
+        ## edge:
+        hetero_graph["admission", "did", "labitem"].edge_index = edge_index_hadm_to_item
+        hetero_graph["admission", "did", "labitem"].x          = ef_items
+        hetero_graph["admission", "did", "labitem"].timestep   = edges_timestep_items
+
+        hetero_graph["admission", "took", "drug"].edge_index = edge_index_hadm_to_drug
+        hetero_graph["admission", "took", "drug"].x          = ef_drugs
+        hetero_graph["admission", "took", "drug"].timestep   = edges_timestep_drugs
+
+        return hetero_graph
+
+
+class SingleItemType(OneAdm):
+    """只考虑 单种 用户-物品关系，如患者-检验项目 or 患者-药物"""
+    def __init__(self, source_dfs: SourceDataFrames, split, item_type: str):
+        super(SingleItemType, self).__init__(source_dfs, split)
+        self.item_type = item_type
+        if self.item_type == "labitem":
+            self.interaction = self.source_dfs.df_labevents
+            self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "CHARTTIME", "ROW_ID"], inplace=True)
+            # TODO: args `cols_to_drop`, 似乎可以排除关系特征列，并将它们加入self.available_fields，供模型预测使用
+            self._prep_interaction(
+                self.interaction,
+                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'CHARTTIME', 'VALUE', 'VALUENUM', 'VALUEUOM', 'FLAG', 'CATAGORY', 'VALUENUM_Z-SCORED'],
+                cols_to_remap={
+                    'HADM_ID': self.source_dfs.tokenfields2mappedid['HADM_ID'],
+                    'ITEMID':  self.source_dfs.tokenfields2mappedid['ITEMID'],
+                },
+                cols_to_rename={
+                    'HADM_ID':  'user_id',
+                    'ITEMID':   'item_id',
+                    'TIMESTEP': 'day',
+                })
+            self.original_item_id_field = 'ITEMID'
+            self.item_feat_fields = list_selected_labitems_columns
+        elif self.item_type == "drug":
+            self.interaction = self.source_dfs.df_prescriptions
+            self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"], inplace=True)
+            self.interaction = self._prep_interaction(
+                self.interaction,
+                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'ICUSTAY_ID', 'STARTDATE', 'ENDDATE', 'DRUG', 'DRUG_NAME_POE', 'DRUG_NAME_GENERIC', 'FORMULARY_DRUG_CD', 'GSN'],
+                cols_to_remap={
+                    'HADM_ID': self.source_dfs.tokenfields2mappedid['HADM_ID'],
+                    'NDC':     self.source_dfs.tokenfields2mappedid['NDC'],
+                },
+                cols_to_rename={
+                    'HADM_ID':  'user_id',
+                    'NDC':      'item_id',
+                    'TIMESTEP': 'day',
+                })
+            self.original_item_id_field = 'NDC'
+            self.item_feat_fields = list_selected_drug_ndc_columns
+        else:
+            raise NotImplementedError
+
+        self.gb_uid = self.interaction.groupby('user_id')
+        self.num_items = self.num(self.original_item_id_field)
+        self.user_feat_fields = list_selected_admission_columns
+        self.original_user_id_field = 'HADM_ID'
+
+        # 这里用映射后的'user_id'和'item_id'，方便直接从对应用户/物品特征tensor中取相应特征行
+        self.available_fields = ['user_id', 'item_id'] + self.item_feat_fields + self.user_feat_fields
+
+    def _prep_interaction(self,
+                          interaction,
+                          cols_to_drop: List,
+                          cols_to_remap: Dict,
+                          cols_to_rename: Dict):
+        interaction.drop(columns=cols_to_drop, inplace=True)
+        interaction['label'] = 1
+        for col, map_df in cols_to_remap.items():
+            map_s = pd.Series(map_df['mappedID'].values, index=map_df[col].values)
+            interaction[col] = interaction[col].map(map_s)
+        interaction.rename(columns=cols_to_rename, inplace=True)
+        return interaction
+
+    def _neg_sample(self, pos_items: List, num_neg_samples: int):
+        all_items = self.source_dfs.tokenfields2mappedid[
+            self.original_item_id_field].mappedID.values.tolist()
+        available = list(set(all_items) - set(pos_items))
+        num_neg_samples = num_neg_samples if num_neg_samples <= len(available) else len(available)
+        return random.sample(available, k=num_neg_samples)
+
+    def __getitem__(self, idx):
+        uid = self.admissions[idx]
+        mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
+        pos_shard = self.gb_uid.get_group(mappedid)
+        gb_day = pos_shard.groupby('day')
+
+        # 按天进行负采样
+        mix_shards = []
+        for d in range(pos_shard.day.max()+1):
+            cur_day_pos_shard = gb_day.get_group(d)
+
+            pos_items = cur_day_pos_shard['item_id'].values.tolist()
+            neg_items = self._neg_sample(pos_items, num_neg_samples=2*len(pos_items))  # 暂用2:1负采样率
+
+            cur_day_neg_shard = pd.DataFrame()
+            cur_day_neg_shard['item_id'] = neg_items
+            cur_day_neg_shard['user_id'] = mappedid
+            cur_day_neg_shard['label'] = 0
+            cur_day_neg_shard['day'] = d
+
+            cur_day_mix_shard = pd.concat([cur_day_pos_shard, cur_day_neg_shard], axis=0)
+            cur_day_mix_shard = cur_day_mix_shard.sample(frac=1)
+
+            mix_shards.append(cur_day_mix_shard)
+
+        interaction = pd.concat(mix_shards, axis=0)
+
+        # 统一变成了以下形式的DF数据，示例：
+        # user_id, item_id, label,  day
+        # -----------------------------
+        #       0,       5,     1,    0
+        #       0,      11,     1,    1
+        #       0,     225,     0,    2
+
+        # 按user_id, item_id，取出相应的用户、物品特征列，一起放入最终的DataFrame(interaction)中
+        user_feat_shard = pd.DataFrame(
+            self.get_user_feature(interaction['user_id'].values),
+            columns=self.user_feat_fields
+        )
+        item_feat_shard = pd.DataFrame(
+            self.get_item_feature(interaction['item_id'].values),
+            columns=self.item_feat_fields
+        )
+
+        # https://stackoverflow.com/questions/35084071
+        interaction.reset_index(inplace=True, drop=True)
+        user_feat_shard.reset_index(inplace=True, drop=True)
+        item_feat_shard.reset_index(inplace=True, drop=True)
+
+        interaction = pd.concat([interaction, user_feat_shard, item_feat_shard], axis=1)
+
+        return interaction
+
+    def get_user_feature(self, uids=None):
+        if uids is None:
+            return self.source_dfs.feat_admis
+        else:
+            return self.source_dfs.feat_admis[uids]
+
+    def get_item_feature(self, iids=None):
+        if self.item_type == "labitem":
+            if iids is None:
+                return self.source_dfs.feat_items
+            else:
+                return self.source_dfs.feat_items[iids]
+        elif self.item_type == "drug":
+            if iids is None:
+                return self.source_dfs.feat_drugs
+            else:
+                return self.source_dfs.feat_drugs[iids]
+        else:
+            raise NotImplementedError
+
+    def num(self, token_field):
+        """return the num of unique values of **token type field**, for embedding"""
+        assert self.source_dfs.field2type[token_field] == FeatureType.TOKEN
+
+        if token_field == 'user_id':
+            token_field = self.original_user_id_field
+        elif token_field == 'item_id':
+            token_field = self.original_item_id_field
+        else:
+            pass
+
+        return len(self.source_dfs.tokenfields2mappedid[token_field])
+
+    def fields(self, ftype=None, source=None):
+        """Given type and source of features, return all the field name of this type and source.
+        If ``ftype == None``, the type of returned fields is not restricted.
+        If ``source == None``, the source of returned fields is not restricted.
+
+        Args:
+            ftype (FeatureType, optional): Type of features. Defaults to ``None``.
+            source (FeatureSource, optional): Source of features. Defaults to ``None``.
+
+        Returns:
+            list: List of field names.
+        """
+        ftype = set(ftype) if ftype is not None else set(FeatureType)
+        source = set(source) if source is not None else set(FeatureSource)
+        ret = []
+        for field in self.available_fields:
+            tp = self.source_dfs.field2type[field]
+            src = self.source_dfs.field2source[field]
+            if tp in ftype and src in source:
+                ret.append(field)
+        return ret
+
+
+def get_pn_item(interaction: pd.DataFrame, is_pos: bool):
+    if is_pos:
+        return torch.from_numpy(interaction[interaction.label == 1].item_id.values)
+    else:
+        return torch.from_numpy(interaction[interaction.label == 0].item_id.values)
+
+
+if __name__ == '__main__':
+    sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
+
+    # dataset = OneAdmOneHG(sources_dfs, "val")
+    # print(dataset[3])
+
+    dataset = SingleItemType(sources_dfs, "val", "labitem")
+    # print(dataset.available_fields)
+    # for field in dataset.available_fields:
+    #     if dataset.source_dfs.field2type[field] == FeatureType.TOKEN:
+    #         print(f"{field}: {dataset.num(field)}")
+    # print('\n')
+    # print(dataset.fields(source=[FeatureSource.USER, FeatureSource.USER_ID]))
+    # print(dataset.fields(source=[FeatureSource.ITEM, FeatureSource.ITEM_ID]))
+    print(dataset[2])
