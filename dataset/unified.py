@@ -441,7 +441,6 @@ class SingleItemType(OneAdm):
         if self.item_type == "labitem":
             self.interaction = self.source_dfs.df_labevents
             self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "CHARTTIME", "ROW_ID"], inplace=True)
-            # TODO: args `cols_to_drop`, 似乎可以排除关系特征列，并将它们加入self.available_fields，供模型预测使用
             self._prep_interaction(
                 self.interaction,
                 cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'CHARTTIME', 'VALUE', 'VALUENUM', 'VALUEUOM', 'FLAG', 'CATAGORY', 'VALUENUM_Z-SCORED'],
@@ -482,7 +481,9 @@ class SingleItemType(OneAdm):
         self.original_user_id_field = 'HADM_ID'
 
         # 这里用映射后的'user_id'和'item_id'，方便直接从对应用户/物品特征tensor中取相应特征行
-        self.available_fields = ['user_id', 'item_id'] + self.item_feat_fields + self.user_feat_fields
+        # 由于负采样的行无实际interaction features，因此不使用FeatureSource.INTERACTION
+        # 顺序上注意遵循先用户、后物品
+        self.available_fields = ['user_id',] + self.user_feat_fields + ['item_id',] + self.item_feat_fields
 
     def _prep_interaction(self,
                           interaction,
