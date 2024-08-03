@@ -455,6 +455,7 @@ class SingleItemType(OneAdm):
                 })
             self.original_item_id_field = 'ITEMID'
             self.item_feat_fields = list_selected_labitems_columns
+            self.item_feat_values = self.source_dfs.feat_items
         elif self.item_type == "drug":
             self.interaction = self.source_dfs.df_prescriptions
             self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"], inplace=True)
@@ -472,12 +473,14 @@ class SingleItemType(OneAdm):
                 })
             self.original_item_id_field = 'NDC'
             self.item_feat_fields = list_selected_drug_ndc_columns
+            self.item_feat_values = self.source_dfs.feat_drugs
         else:
             raise NotImplementedError
 
         self.gb_uid = self.interaction.groupby('user_id')
         self.num_items = self.num(self.original_item_id_field)
         self.user_feat_fields = list_selected_admission_columns
+        self.user_feat_values = self.source_dfs.feat_admis
         self.original_user_id_field = 'HADM_ID'
 
         # 这里用映射后的'user_id'和'item_id'，方便直接从对应用户/物品特征tensor中取相应特征行
@@ -498,17 +501,14 @@ class SingleItemType(OneAdm):
         interaction.rename(columns=cols_to_rename, inplace=True)
         return interaction
 
-    def _neg_sample(self, pos_items: List, num_neg_samples: int):
+    def _cur_day_neg_sample(self, pos_items: List, num_neg_samples: int):
         all_items = self.source_dfs.tokenfields2mappedid[
             self.original_item_id_field].mappedID.values.tolist()
         available = list(set(all_items) - set(pos_items))
         num_neg_samples = num_neg_samples if num_neg_samples <= len(available) else len(available)
         return random.sample(available, k=num_neg_samples)
 
-    def __getitem__(self, idx):
-        uid = self.admissions[idx]
-        mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
-        pos_shard = self.gb_uid.get_group(mappedid)
+    def _all_day_neg_samples(self, pos_shard, mappedid):
         gb_day = pos_shard.groupby('day')
 
         # 按天进行负采样
@@ -517,7 +517,7 @@ class SingleItemType(OneAdm):
             cur_day_pos_shard = gb_day.get_group(d)
 
             pos_items = cur_day_pos_shard['item_id'].values.tolist()
-            neg_items = self._neg_sample(pos_items, num_neg_samples=2*len(pos_items))  # 暂用2:1负采样率
+            neg_items = self._cur_day_neg_sample(pos_items, num_neg_samples=2*len(pos_items))  # 暂用2:1负采样率
 
             cur_day_neg_shard = pd.DataFrame()
             cur_day_neg_shard['item_id'] = neg_items
@@ -530,31 +530,19 @@ class SingleItemType(OneAdm):
 
             mix_shards.append(cur_day_mix_shard)
 
-        interaction = pd.concat(mix_shards, axis=0)
-
         # 统一变成了以下形式的DF数据，示例：
         # user_id, item_id, label,  day
         # -----------------------------
         #       0,       5,     1,    0
         #       0,      11,     1,    1
         #       0,     225,     0,    2
+        return pd.concat(mix_shards, axis=0)
 
-        # 按user_id, item_id，取出相应的用户、物品特征列，一起放入最终的DataFrame(interaction)中
-        user_feat_shard = pd.DataFrame(
-            self.get_user_feature(interaction['user_id'].values),
-            columns=self.user_feat_fields
-        )
-        item_feat_shard = pd.DataFrame(
-            self.get_item_feature(interaction['item_id'].values),
-            columns=self.item_feat_fields
-        )
-
-        # https://stackoverflow.com/questions/35084071
-        interaction.reset_index(inplace=True, drop=True)
-        user_feat_shard.reset_index(inplace=True, drop=True)
-        item_feat_shard.reset_index(inplace=True, drop=True)
-
-        interaction = pd.concat([interaction, user_feat_shard, item_feat_shard], axis=1)
+    def __getitem__(self, idx):
+        uid = self.admissions[idx]
+        mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
+        pos_shard = self.gb_uid.get_group(mappedid)
+        interaction = self._all_day_neg_samples(pos_shard, mappedid)
 
         return interaction
 
@@ -614,6 +602,36 @@ class SingleItemType(OneAdm):
         return ret
 
 
+class SingleItemTypeForContextAwareRec(SingleItemType):
+    def __getitem__(self, idx):
+        uid = self.admissions[idx]
+        mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
+        pos_shard = self.gb_uid.get_group(mappedid)
+
+        interaction = self._all_day_neg_samples(pos_shard, mappedid)
+        interaction = self._concat_corr_user_item_feat(interaction)
+
+        return interaction
+
+    def _concat_corr_user_item_feat(self, interaction):
+        # 按user_id, item_id，取出相应的用户、物品特征列，一起放入最终的DataFrame(interaction)中
+        user_feat_shard = pd.DataFrame(
+            self.get_user_feature(interaction['user_id'].values),
+            columns=self.user_feat_fields
+        )
+        item_feat_shard = pd.DataFrame(
+            self.get_item_feature(interaction['item_id'].values),
+            columns=self.item_feat_fields
+        )
+
+        # https://stackoverflow.com/questions/35084071
+        interaction.reset_index(inplace=True, drop=True)
+        user_feat_shard.reset_index(inplace=True, drop=True)
+        item_feat_shard.reset_index(inplace=True, drop=True)
+
+        return pd.concat([interaction, user_feat_shard, item_feat_shard], axis=1)
+
+
 def get_pn_item(interaction: pd.DataFrame, is_pos: bool):
     if is_pos:
         return torch.from_numpy(interaction[interaction.label == 1].item_id.values)
@@ -623,16 +641,5 @@ def get_pn_item(interaction: pd.DataFrame, is_pos: bool):
 
 if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
-
-    # dataset = OneAdmOneHG(sources_dfs, "val")
-    # print(dataset[3])
-
-    dataset = SingleItemType(sources_dfs, "val", "labitem")
-    # print(dataset.available_fields)
-    # for field in dataset.available_fields:
-    #     if dataset.source_dfs.field2type[field] == FeatureType.TOKEN:
-    #         print(f"{field}: {dataset.num(field)}")
-    # print('\n')
-    # print(dataset.fields(source=[FeatureSource.USER, FeatureSource.USER_ID]))
-    # print(dataset.fields(source=[FeatureSource.ITEM, FeatureSource.ITEM_ID]))
-    print(dataset[2])
+    dataset = SingleItemTypeForContextAwareRec(sources_dfs, "val", "labitem")
+    print(dataset[7])

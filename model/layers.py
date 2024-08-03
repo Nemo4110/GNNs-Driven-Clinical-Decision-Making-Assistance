@@ -407,19 +407,62 @@ class BaseEmbeddingLayer(nn.Module):
         self.device = config["device"]
         self.embedding_size = config["embedding_size"]
         self.LABEL = config["LABEL_FIELD"]
-        self.field_names = dataset.fields(source=[
-                # FeatureSource.INTERACTION,  # 由于负采样行没有实际interaction features，因此不使用
-                FeatureSource.USER,
-                # user_id不应该作为用户塔的特征，
-                # 否则按目前以adm划分训练、测试、验证的做法，在后面两个集合的user_id对应的embedding向量不会被优化到
-                # FeatureSource.USER_ID,
-                FeatureSource.ITEM,
-                FeatureSource.ITEM_ID,
-            ])
-        self.numerical_features = config["numerical_features"]
+
+        # 子类初始化完需要调用以下函数！
+        # self._get_fields_names_dims(dataset)
+        # self._get_embedding_tables()
+
+    def _get_fields_names_dims(self, dataset):
+        raise NotImplementedError
+
+    def _get_embedding_tables(self):
+        raise NotImplementedError
+
+
+class ContextEmbeddingLayer(BaseEmbeddingLayer):
+    def __init__(self, config, dataset):
+        super(ContextEmbeddingLayer, self).__init__(config, dataset)
+
+        self.field_names = dataset.fields(source=[FeatureSource.USER, FeatureSource.ITEM_ID, FeatureSource.ITEM])
+
+        self.double_tower = config.get("double_tower", None)
+        if self.double_tower is None:
+            self.double_tower = False
+
+        if self.double_tower:  # 也就是说分物品塔和用户塔
+            # user_id不应该作为用户塔的特征，
+            # 否则按目前以adm划分训练、测试、验证的做法，在后面两个集合的user_id对应的embbeding向量不会被优化到
+            self.user_field_names = dataset.fields(source=[FeatureSource.USER,])
+            self.item_field_names = dataset.fields(source=[FeatureSource.ITEM_ID, FeatureSource.ITEM])
+            self.field_names = self.user_field_names + self.item_field_names  # 先用户，后物品
+
+            # 统计各类型的特征列数量
+            # 用户塔
+            self.user_token_field_num = 0
+            self.user_float_field_num = 0
+            for field_name in self.user_field_names:
+                if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
+                    self.user_token_field_num += 1
+                elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
+                    self.user_float_field_num += 1
+                else:
+                    raise NotImplementedError
+            # 物品塔
+            self.item_token_field_num = 0
+            self.item_float_field_num = 0
+            for field_name in self.item_field_names:
+                if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
+                    self.item_token_field_num += 1
+                elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
+                    self.item_float_field_num += 1
+                else:
+                    raise NotImplementedError
 
         self._get_fields_names_dims(dataset)
         self._get_embedding_tables()
+
+        # FM类模型用的first_order_linear
+        self.first_order_linear = nn.Linear(self.embedding_size, 1, bias=True)
 
     def _get_fields_names_dims(self, dataset):
         # 统计各类型特征列名 + token类型特征列有多少种不同值的数量
@@ -434,8 +477,7 @@ class BaseEmbeddingLayer(nn.Module):
             if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
                 self.token_field_names.append(field_name)
                 self.token_field_dims.append(dataset.num(field_name))
-            elif (dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT and
-                  field_name in self.numerical_features):
+            elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
                 self.float_field_names.append(field_name)
             else:
                 continue
@@ -503,46 +545,6 @@ class BaseEmbeddingLayer(nn.Module):
             return None
         token_embedding = self.token_embedding_table(token_fields)
         return token_embedding
-
-
-class ContextEmbeddingLayer(BaseEmbeddingLayer):
-    def __init__(self, config, dataset):
-        super(ContextEmbeddingLayer, self).__init__(config, dataset)
-        self.double_tower = config.get("double_tower", None)
-        if self.double_tower is None:
-            self.double_tower = False
-
-        if self.double_tower:  # 也就是说分物品塔和用户塔
-            # user_id不应该作为用户塔的特征，
-            # 否则按目前以adm划分训练、测试、验证的做法，在后面两个集合的user_id对应的embbeding向量不会被优化到
-            self.user_field_names = dataset.fields(source=[FeatureSource.USER,])
-            self.item_field_names = dataset.fields(source=[FeatureSource.ITEM, FeatureSource.ITEM_ID])
-            self.field_names = self.user_field_names + self.item_field_names  # 先用户，后物品
-
-            # 统计各类型的特征列数量
-            # 用户塔
-            self.user_token_field_num = 0
-            self.user_float_field_num = 0
-            for field_name in self.user_field_names:
-                if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
-                    self.user_token_field_num += 1
-                elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
-                    self.user_float_field_num += 1
-                else:
-                    raise NotImplementedError
-            # 物品塔
-            self.item_token_field_num = 0
-            self.item_float_field_num = 0
-            for field_name in self.item_field_names:
-                if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
-                    self.item_token_field_num += 1
-                elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
-                    self.item_float_field_num += 1
-                else:
-                    raise NotImplementedError
-
-        # FM类模型用的first_order_linear
-        self.first_order_linear = nn.Linear(self.embedding_size, 1, bias=True)
 
     def double_tower_embed_input_fields(self, interaction):
         """Embed the whole feature columns in a double tower way.
