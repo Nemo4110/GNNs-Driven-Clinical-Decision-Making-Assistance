@@ -4,7 +4,7 @@ import numpy as np
 
 from dataset.unified import SingleItemType
 from utils.misc import set_color
-from model.layers import ContextEmbeddingLayer
+from model.layers import GeneralEmbeddingLayer, ContextEmbeddingLayer
 
 
 class AbstractRecommender(nn.Module):
@@ -35,12 +35,24 @@ class GeneralRecommender(AbstractRecommender):
         super(GeneralRecommender, self).__init__()
 
         # 获取数据集信息
-        self.USER_ID = config["USER_ID_FIELD"]  # 记录用户id的列名
-        self.ITEM_ID = config["ITEM_ID_FIELD"]  # 记录物品id的列名
-        self.n_users = dataset.n_users
-        self.n_items = dataset.n_items
+        self.USER_ID = config.get("USER_ID_FIELD", "user_id")  # 记录用户id的列名
+        self.ITEM_ID = config.get("ITEM_ID_FIELD", "item_id")  # 记录物品id的列名
+
+        self.embedding_size = config["embedding_size"]
+        self.embedding_layer = GeneralEmbeddingLayer(config, dataset)
 
         self.device = config["device"]
+
+        self.num_user_feature = len(self.embedding_layer.user_token_field_names) + 1 \
+            if len(self.embedding_layer.user_float_field_names) > 0 \
+            else len(self.embedding_layer.user_token_field_names)
+        self.num_item_feature = len(self.embedding_layer.item_token_field_names) + 1 \
+            if len(self.embedding_layer.item_float_field_names) > 0 \
+            else len(self.embedding_layer.item_token_field_names)
+
+        # 用于对齐维度
+        self.uf_aligner = nn.Linear(self.num_user_feature * self.embedding_size, self.embedding_size)
+        self.if_aligner = nn.Linear(self.num_item_feature * self.embedding_size, self.embedding_size)
 
 
 class SequentialRecommender(AbstractRecommender):

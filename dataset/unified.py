@@ -602,6 +602,14 @@ class SingleItemType(OneAdm):
         return ret
 
 
+def get_pos_or_neg_shard(interaction: pd.DataFrame, is_pos: bool):
+    """得到interaction正或负样本的部分"""
+    if is_pos:
+        return interaction[interaction.label == 1]
+    else:
+        return interaction[interaction.label == 0]
+
+
 class SingleItemTypeForContextAwareRec(SingleItemType):
     def __getitem__(self, idx):
         uid = self.admissions[idx]
