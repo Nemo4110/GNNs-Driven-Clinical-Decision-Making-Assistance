@@ -632,11 +632,42 @@ class SingleItemTypeForContextAwareRec(SingleItemType):
         return pd.concat([interaction, user_feat_shard, item_feat_shard], axis=1)
 
 
-def get_pn_item(interaction: pd.DataFrame, is_pos: bool):
-    if is_pos:
-        return torch.from_numpy(interaction[interaction.label == 1].item_id.values)
-    else:
-        return torch.from_numpy(interaction[interaction.label == 0].item_id.values)
+class SingleItemTypeForSequentialRec(SingleItemType):
+    def __getitem__(self, idx):
+        uid = self.admissions[idx]
+        mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
+        pos_shard = self.gb_uid.get_group(mappedid)
+
+        interaction = self._all_day_neg_samples(pos_shard, mappedid)
+        interaction = self._add_history_seq(pos_shard, interaction)
+
+        return interaction
+
+    def _add_history_seq(self, pos_shard, interaction):
+        """从第二天开始，为每条记录添加历史序列，"""
+        pos_gb_day = pos_shard.groupby('day')
+        int_gb_day = interaction.groupby('day')
+
+        collector = []
+        for d in range(1, pos_shard.day.max()+1):
+            pos_pre_day = pos_gb_day.get_group(d-1)
+            int_cur_day = int_gb_day.get_group(d)
+
+            history = pos_pre_day['item_id'].values.tolist()
+            history_len = len(history)
+
+            history = [history for _ in range(len(int_cur_day))]
+            history_len = [history_len for _ in range(len(int_cur_day))]
+
+            df_hist = pd.DataFrame({'history': history,
+                                    'history_len': history_len})
+
+            int_cur_day.reset_index(inplace=True, drop=True)
+            df_hist.reset_index(inplace=True, drop=True)
+
+            collector.append(pd.concat([int_cur_day, df_hist], axis=1))
+
+        return pd.concat(collector, axis=0)
 
 
 if __name__ == '__main__':
