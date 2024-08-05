@@ -6,6 +6,7 @@ from model.layers import SequentialEmbeddingLayer
 from dataset.unified import SourceDataFrames, SingleItemType, SingleItemTypeForContextAwareRec, SingleItemTypeForSequentialRec
 from utils.enum_type import FeatureType, FeatureSource
 
+
 if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"data\mimic-iii-clinical-database-1.4")
 
@@ -57,7 +58,7 @@ if __name__ == '__main__':
     # loss = net.calculate_loss(dataset[2])
 
     """↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ SequentialRecommender ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓"""
-    dataset = SingleItemTypeForSequentialRec(sources_dfs, "test", "drug")
+    dataset = SingleItemTypeForSequentialRec(sources_dfs, "val", "drug")
     interaction = dataset[2]
 
     # SequentialEmbeddingLayer
@@ -73,14 +74,27 @@ if __name__ == '__main__':
     # user_embedding, item_seqs_embedding = emb_layer(interaction)
 
     # DIN
+    # config = {
+    #     "mlp_hidden_size": [128, 64, 32],
+    #     "dropout_prob": 0.1,
+    #     "embedding_size": 32,
+    #     "device": torch.device('cpu'),
+    #     "LABEL_FIELD": "label",
+    #     "MAX_HISTORY_ITEM_ID_LIST_LENGTH": 100,
+    # }
+    # net = sequential_recommender.DIN(config, dataset)
+    # loss = net.calculate_loss(interaction)
+    # print(loss)
+
+    # SASRec
     config = {
-        "mlp_hidden_size": [128, 64, 32],
+        "mlp_hidden_size": [16, 32, 16],
         "dropout_prob": 0.1,
-        "embedding_size": 32,
+        "embedding_size": 16,
         "device": torch.device('cpu'),
         "LABEL_FIELD": "label",
         "MAX_HISTORY_ITEM_ID_LIST_LENGTH": 100,
     }
-    net = sequential_recommender.DIN(config, dataset)
+    net = sequential_recommender.SASRec(config, dataset)
     loss = net.calculate_loss(interaction)
     print(loss)
