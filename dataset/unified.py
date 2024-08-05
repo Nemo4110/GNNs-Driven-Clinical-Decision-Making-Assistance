@@ -194,7 +194,6 @@ class SourceDataFrames:
         self.path_etl_output = path_etl_output
 
         # 读取etl处理后的数据
-        print(">" + "-" * 43)
         print("> loading .csv files...")
         self.df_admissions    = pd.read_csv(os.path.join(self.path_etl_output, "ADMISSIONS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
         self.df_labitems      = pd.read_csv(os.path.join(self.path_etl_output, "D_LABITEMS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
@@ -236,21 +235,19 @@ class SourceDataFrames:
         self.feat_items = torch.from_numpy(self.df_labitems[list_selected_labitems_columns].values)
         self.feat_drugs = torch.from_numpy(self.df_drug_ndc_feat[list_selected_drug_ndc_columns].values)
 
-        print(">" + "-" * 43 + "\n")
-
     def _filter_out_adm_len_lt_2(self):
-        """过滤掉住院长度小于2的HADM_ID"""
-        length_per_hadm_l = self.df_labevents.groupby('HADM_ID')[['TIMESTEP']].max()
-        length_per_hadm_p = self.df_prescriptions.groupby('HADM_ID')[['TIMESTEP']].max()
-        length_per_hadm_l_multidays = length_per_hadm_l[length_per_hadm_l.TIMESTEP >= 1]
-        length_per_hadm_p_multidays = length_per_hadm_p[length_per_hadm_p.TIMESTEP >= 1]
+        """过滤掉住院长度小于2的HADM_ID,也就是说至少要有2天的记录"""
+        length_per_hadm_l = self.df_labevents.groupby('HADM_ID')[['TIMESTEP']].nunique()
+        length_per_hadm_p = self.df_prescriptions.groupby('HADM_ID')[['TIMESTEP']].nunique()
+        length_per_hadm_l_multidays = length_per_hadm_l[length_per_hadm_l.TIMESTEP > 1]
+        length_per_hadm_p_multidays = length_per_hadm_p[length_per_hadm_p.TIMESTEP > 1]
 
         adm_l = set(list(length_per_hadm_l_multidays.index))
         adm_p = set(list(length_per_hadm_p_multidays.index))
 
         both = list(set.intersection(adm_l, adm_p))
         both = list(map(int, both))
-        print(f"> total adm whose length >1: {len(both)}")
+        print(f"> total adm whose length > 1: {len(both)}")
 
         return both
 
@@ -513,7 +510,7 @@ class SingleItemType(OneAdm):
 
         # 按天进行负采样
         mix_shards = []
-        for d in range(pos_shard.day.max()+1):
+        for d in pos_shard.day.unique().tolist():
             cur_day_pos_shard = gb_day.get_group(d)
 
             pos_items = cur_day_pos_shard['item_id'].values.tolist()
@@ -657,8 +654,11 @@ class SingleItemTypeForSequentialRec(SingleItemType):
         int_gb_day = interaction.groupby('day')
 
         collector = []
-        for d in range(1, pos_shard.day.max()+1):
-            pos_pre_day = pos_gb_day.get_group(d-1)
+        days = pos_shard.day.unique().tolist()
+        for i, d in enumerate(days):
+            if i == 0:
+                continue
+            pos_pre_day = pos_gb_day.get_group(days[i-1])  # 前一个有记录的天
             int_cur_day = int_gb_day.get_group(d)
 
             history = pos_pre_day['item_id'].values.tolist()
