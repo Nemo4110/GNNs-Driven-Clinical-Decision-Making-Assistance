@@ -60,11 +60,12 @@ class SequentialRecommender(AbstractRecommender):
         super(SequentialRecommender, self).__init__()
 
         # load dataset info
-        self.USER_ID = config["USER_ID_FIELD"]
-        self.ITEM_ID = config["ITEM_ID_FIELD"]
-
-        self.max_seq_length = config["MAX_ITEM_LIST_LENGTH"]
-        self.n_items = dataset.num(self.ITEM_ID)
+        self.USER_ID = config.get("USER_ID_FIELD", "user_id")
+        self.ITEM_ID = config.get("ITEM_ID_FIELD", "item_id")
+        self.ITEM_SEQ = config.get("HISTORY_ITEM_ID_FIELD", "history")
+        self.ITEM_SEQ_LEN = config.get("HISTORY_ITEM_ID_LIST_LENGTH_FIELD", "history_len")
+        self.max_seq_length = config.get("MAX_HISTORY_ITEM_ID_LIST_LENGTH", 100)
+        self.n_items = dataset.num_items
 
         # load parameters info
         self.device = config["device"]

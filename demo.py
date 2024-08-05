@@ -12,7 +12,7 @@ if __name__ == '__main__':
     """↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ context_aware_recommender ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓"""
     # dataset = SingleItemTypeForContextAwareRec(sources_dfs, "val", "labitem")
 
-    """DSSM"""
+    # DSSM
     # config = {
     #     "mlp_hidden_size": [128, 64, 32],
     #     "dropout_prob": 0.1,
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     # }
     # net = context_aware_recommender.DSSM(config, dataset)
 
-    """DeepFM"""
+    # DeepFM
     # config = {
     #     "mlp_hidden_size": [128, 64, 32],
     #     "dropout_prob": 0.1,
@@ -35,11 +35,32 @@ if __name__ == '__main__':
     # }
     # net = context_aware_recommender.DeepFM(config, dataset)
 
+    """↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ GeneralRecommender ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓"""
+    # dataset = SingleItemType(sources_dfs, "val", "drug")
+    # NeuMF
+    # config = {
+    #     "mlp_hidden_size": [128, 64, 32],
+    #     "dropout_prob": 0.1,
+    #     "embedding_size": 32,
+    #     "device": torch.device('cpu'),
+    #     "LABEL_FIELD": "label",
+    # }
+    # net = general_recommender.NeuMF(config, dataset)
     # loss = net.calculate_loss(dataset[2])
-    # print(loss)
+    # BPR
+    # config = {
+    #     "embedding_size": 32,
+    #     "device": torch.device('cpu'),
+    #     "LABEL_FIELD": "label",
+    # }
+    # net = general_recommender.BPR(config, dataset)
+    # loss = net.calculate_loss(dataset[2])
 
-    """SequentialEmbeddingLayer"""
-    # dataset = SingleItemTypeForSequentialRec(sources_dfs, "test", "labitem")
+    """↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ SequentialRecommender ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓"""
+    dataset = SingleItemTypeForSequentialRec(sources_dfs, "test", "drug")
+    interaction = dataset[2]
+
+    # SequentialEmbeddingLayer
     # config = {
     #     "dropout_prob": 0.1,
     #     "embedding_size": 32,
@@ -51,23 +72,15 @@ if __name__ == '__main__':
     # interaction = dataset[1]
     # user_embedding, item_seqs_embedding = emb_layer(interaction)
 
-    """↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ GeneralRecommender ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓"""
-    dataset = SingleItemType(sources_dfs, "val", "drug")
-    """NeuMF"""
-    # config = {
-    #     "mlp_hidden_size": [128, 64, 32],
-    #     "dropout_prob": 0.1,
-    #     "embedding_size": 32,
-    #     "device": torch.device('cpu'),
-    #     "LABEL_FIELD": "label",
-    # }
-    # net = general_recommender.NeuMF(config, dataset)
-    # loss = net.calculate_loss(dataset[2])
-    """BPR"""
+    # DIN
     config = {
+        "mlp_hidden_size": [128, 64, 32],
+        "dropout_prob": 0.1,
         "embedding_size": 32,
         "device": torch.device('cpu'),
         "LABEL_FIELD": "label",
+        "MAX_HISTORY_ITEM_ID_LIST_LENGTH": 100,
     }
-    net = general_recommender.BPR(config, dataset)
-    loss = net.calculate_loss(dataset[2])
+    net = sequential_recommender.DIN(config, dataset)
+    loss = net.calculate_loss(interaction)
+    print(loss)
