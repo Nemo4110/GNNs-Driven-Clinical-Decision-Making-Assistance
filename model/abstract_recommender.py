@@ -70,6 +70,13 @@ class SequentialRecommender(AbstractRecommender):
         # load parameters info
         self.device = config["device"]
 
+    @staticmethod
+    def gather_indexes(output, gather_index):
+        """Gathers the vectors at the specific positions over a minibatch"""
+        gather_index = gather_index.view(-1, 1, 1).expand(-1, -1, output.shape[-1])
+        output_tensor = output.gather(dim=1, index=gather_index)
+        return output_tensor.squeeze(1)
+
 
 class ContextRecommender(AbstractRecommender):
     def __init__(self, config, dataset: SingleItemType):
