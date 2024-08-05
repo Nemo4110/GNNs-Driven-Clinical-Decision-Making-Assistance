@@ -461,7 +461,7 @@ class SingleItemType(OneAdm):
             self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"], inplace=True)
             self.interaction = self._prep_interaction(
                 self.interaction,
-                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'ICUSTAY_ID', 'STARTDATE', 'ENDDATE', 'DRUG', 'DRUG_NAME_POE', 'DRUG_NAME_GENERIC', 'FORMULARY_DRUG_CD', 'GSN'],
+                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'ICUSTAY_ID', 'STARTDATE', 'ENDDATE', 'DRUG', 'DRUG_NAME_POE', 'DRUG_NAME_GENERIC', 'FORMULARY_DRUG_CD', 'GSN'] + list_selected_prescriptions_columns,
                 cols_to_remap={
                     'HADM_ID': self.source_dfs.tokenfields2mappedid['HADM_ID'],
                     'NDC':     self.source_dfs.tokenfields2mappedid['NDC'],
@@ -638,13 +638,6 @@ class SingleItemTypeForContextAwareRec(SingleItemType):
         item_feat_shard.reset_index(inplace=True, drop=True)
 
         return pd.concat([interaction, user_feat_shard, item_feat_shard], axis=1)
-
-
-def get_pn_item(interaction: pd.DataFrame, is_pos: bool):
-    if is_pos:
-        return torch.from_numpy(interaction[interaction.label == 1].item_id.values)
-    else:
-        return torch.from_numpy(interaction[interaction.label == 0].item_id.values)
 
 
 if __name__ == '__main__':
