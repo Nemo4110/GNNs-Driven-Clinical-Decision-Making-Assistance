@@ -47,7 +47,11 @@ class SASRec(SequentialRecommender):
             num_item_feature = len(self.embedding_layer.item_token_field_names) + 1 + 1  # for conceited id emb
         else:
             num_item_feature = len(self.embedding_layer.item_token_field_names) + 1
-        self.ie_fc = nn.Linear(num_item_feature * self.embedding_size, self.hidden_size)
+
+        # RuntimeError: Trying to backward through the graph a second time
+        # https://discuss.pytorch.org/t/pytorch-runtimeerror-trying-to-backward-through-the-graph-a-second-time/191396/2
+        self.hst_ie_fc = nn.Linear(num_item_feature * self.embedding_size, self.hidden_size)
+        self.tgt_ie_fc = nn.Linear(num_item_feature * self.embedding_size, self.hidden_size)
 
         # 与原论文保持一致，使用二分类CE
         self.loss_fct = nn.BCEWithLogitsLoss()
@@ -60,7 +64,7 @@ class SASRec(SequentialRecommender):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0)
+            module.weight.data.normal_(mean=0.0, std=0.02)
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -76,9 +80,9 @@ class SASRec(SequentialRecommender):
         target_item_feat_emb = target_item_feat_emb.squeeze(1)  # [B, ?]
 
         # 注意上面的这些_embedding的最后一维并不是self.hidden_size
-        user_embedding = self.ue_fc(user_embedding.view(B, -1))
-        target_item_feat_emb = self.ie_fc(target_item_feat_emb)
-        history_item_feat_emd = self.ie_fc(history_item_feat_emd)
+        user_embedding = self.ue_fc(user_embedding)
+        target_item_feat_emb = self.tgt_ie_fc(target_item_feat_emb)
+        history_item_feat_emd = self.hst_ie_fc(history_item_feat_emd)
 
         # position information
         position_ids = torch.arange(history_item_feat_emd.size(1), dtype=torch.long, device=self.device)

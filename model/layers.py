@@ -414,35 +414,7 @@ class BaseEmbeddingLayer(nn.Module):
         # self._get_embedding_tables()
 
     def _get_fields_names_dims(self, dataset):
-        raise NotImplementedError
-
-    def _get_embedding_tables(self):
-        raise NotImplementedError
-
-
-class GeneralEmbeddingLayer(BaseEmbeddingLayer):
-    def __init__(self, config, dataset):
-        super(GeneralEmbeddingLayer, self).__init__(config, dataset)
-
-        self.user_field_names = dataset.fields(source=[FeatureSource.USER, ])
-        self.item_field_names = dataset.fields(source=[FeatureSource.ITEM, ])
-
-        self.USER_ID = config.get("USER_ID_FIELD", "user_id")
-        self.ITEM_ID = config.get("ITEM_ID_FIELD", "item_id")
-
-        self.n_items = dataset.num_items
-        self.item_id_embedding_table = nn.Embedding(self.n_items, self.embedding_size)
-
-        self.user_features = dataset.user_feat_values
-        self.item_features = dataset.item_feat_values
-
-        self._get_fields_names_dims(dataset)
-        self._get_embedding_tables()
-
-        self._embed_user_feat_fields()
-        self._embed_item_feat_fields()
-
-    def _get_fields_names_dims(self, dataset):
+        """分用户user、物品item，获取token和float类型的特征列数量及相应维度"""
         # user
         self.user_token_field_dims = []
         self.user_token_field_names = []
@@ -470,6 +442,7 @@ class GeneralEmbeddingLayer(BaseEmbeddingLayer):
                 raise NotImplementedError
 
     def _get_embedding_tables(self):
+        """分用户user、物品item，获取token和float类型的embedding表格"""
         # user
         if len(self.user_token_field_dims) > 0:
             self.user_token_field_offsets = np.array(
@@ -492,47 +465,82 @@ class GeneralEmbeddingLayer(BaseEmbeddingLayer):
         if len(self.item_float_field_names) > 0:
             self.item_float_embedding_table = nn.Linear(len(self.item_float_field_names), self.embedding_size)
 
-    def _embed_item_feat_fields(self):
+    def _embed_item_feat_fields(self, item_id):
+        original_item_features = self.item_features[item_id]
+
         # float fields first，要求物品对应特征源df中，float类型的特征列放最前面，目前药物、检验项目的df都满足要求
         if len(self.item_float_field_names) > 0:
-            item_dense_embeddings = self.item_float_embedding_table(
-                self.item_features[:, :len(self.item_float_field_names)].float()).unsqueeze(1)
+            item_float_features = original_item_features[:, :len(self.item_float_field_names)].float()
+            item_dense_embeddings = self.item_float_embedding_table(item_float_features).unsqueeze(1)
         else:
             item_dense_embeddings = None
+
         if len(self.item_token_field_names) > 0:
-            item_sparse_embeddings = self.item_token_embedding_table(
-                self.item_features[:, -len(self.item_token_field_names):].long())
+            item_token_features = original_item_features[:, -len(self.item_token_field_names):].long()
+            item_sparse_embeddings = self.item_token_embedding_table(item_token_features)
         else:
             item_sparse_embeddings = None
 
         if item_dense_embeddings is not None and item_sparse_embeddings is not None:
-            self.embed_item_features = torch.cat([item_dense_embeddings, item_sparse_embeddings], dim=1)
+            return torch.cat([item_dense_embeddings, item_sparse_embeddings], dim=1)
         else:
-            self.embed_item_features = item_sparse_embeddings if item_sparse_embeddings is not None else item_dense_embeddings
+            return item_sparse_embeddings if item_sparse_embeddings is not None else item_dense_embeddings
 
-    def _embed_user_feat_fields(self):
+    def _embed_user_feat_fields(self, user_id):
+        # STEP 1: 先从原始特征数据表中，按user_id取出相应行
+        original_user_features = self.user_features[user_id]
+
+        # STEP 2: 处理float类型特征
         if len(self.user_float_field_names) > 0:
+            # 要求：user特征表中，float类型的列放最前面
+            #      mimic-iii的admission表一开始就满足要求，因为它没有float类型的特征列
+            user_float_features = original_user_features[:, :len(self.user_float_field_names)]
             user_dense_embeddings = self.user_float_embedding_table(
-                self.user_features[:, :len(self.user_float_field_names)]).unsqueeze(1)
+                user_float_features).unsqueeze(1)  # [B, n_float_field] -> [B, 1, embedding_size]
         else:
             user_dense_embeddings = None
+
+        # STEP 3：处理token类型特征
         if len(self.user_token_field_names) > 0:
+            user_token_features = original_user_features[:, -len(self.user_token_field_names):]
             user_sparse_embeddings = self.user_token_embedding_table(
-                self.user_features[:, -len(self.user_token_field_names):])
+                user_token_features)
         else:
             user_sparse_embeddings = None
 
+        # STEP 4：合并dense、sparse embedding
         if user_dense_embeddings is not None and user_sparse_embeddings is not None:
-            self.embed_user_features = torch.cat([user_dense_embeddings, user_sparse_embeddings], dim=1)
+            return torch.cat([user_dense_embeddings, user_sparse_embeddings], dim=1).flatten(start_dim=1)
         else:
-            self.embed_user_features = user_sparse_embeddings if user_sparse_embeddings is not None else user_dense_embeddings
+            return user_sparse_embeddings.flatten(start_dim=1) if user_sparse_embeddings is not None \
+                else user_dense_embeddings.flatten(start_dim=1)
+
+
+class GeneralEmbeddingLayer(BaseEmbeddingLayer):
+    def __init__(self, config, dataset):
+        super(GeneralEmbeddingLayer, self).__init__(config, dataset)
+
+        self.user_field_names = dataset.fields(source=[FeatureSource.USER, ])
+        self.item_field_names = dataset.fields(source=[FeatureSource.ITEM, ])
+
+        self.USER_ID = config.get("USER_ID_FIELD", "user_id")
+        self.ITEM_ID = config.get("ITEM_ID_FIELD", "item_id")
+
+        self.n_items = dataset.num_items
+        self.item_id_embedding_table = nn.Embedding(self.n_items, self.embedding_size)
+
+        self.user_features = dataset.user_feat_values
+        self.item_features = dataset.item_feat_values
+
+        self._get_fields_names_dims(dataset)
+        self._get_embedding_tables()
 
     def forward(self, interaction):
-        users = torch.from_numpy(interaction[self.USER_ID].values)
-        items = torch.from_numpy(interaction[self.ITEM_ID].values)
+        users = torch.from_numpy(interaction[self.USER_ID].values).long().to(self.device)
+        items = torch.from_numpy(interaction[self.ITEM_ID].values).long().to(self.device)
 
-        users_embedding = self.embed_user_features[users]
-        items_embedding = self.embed_item_features[items]
+        users_embedding = self._embed_user_feat_fields(users)
+        items_embedding = self._embed_item_feat_fields(items)
 
         return users_embedding, items_embedding
 
@@ -720,7 +728,9 @@ class SequentialEmbeddingLayer(BaseEmbeddingLayer):
         self.max_seq_length = config.get("MAX_HISTORY_ITEM_ID_LIST_LENGTH", 100)
 
         self.n_items = dataset.num_items  # 获取有多少个候选物品
-        self.item_id_embedding_table = nn.Embedding(self.n_items, self.embedding_size)
+        self.item_padding_idx = self.n_items  # 约定padding_idx
+        self.item_id_embedding_table = nn.Embedding(
+            self.n_items + 1, self.embedding_size, padding_idx=self.item_padding_idx)
 
         self.user_features = dataset.user_feat_values
         self.item_features = dataset.item_feat_values
@@ -728,134 +738,51 @@ class SequentialEmbeddingLayer(BaseEmbeddingLayer):
         self._get_fields_names_dims(dataset)
         self._get_embedding_tables()
 
-        self._embed_user_feat_fields()
-        self._embed_item_feat_fields()
-
-    def _get_fields_names_dims(self, dataset):
-        # user
-        self.user_token_field_dims = []
-        self.user_token_field_names = []
-        self.user_float_field_names = []
-        for field_name in self.user_field_names:
-            if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
-                self.user_token_field_names.append(field_name)
-                self.user_token_field_dims.append(dataset.num(field_name))
-            elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
-                self.user_float_field_names.append(field_name)
-            else:
-                raise NotImplementedError
-
-        # item
-        self.item_token_field_dims = []
-        self.item_token_field_names = []
-        self.item_float_field_names = []
-        for field_name in self.item_field_names:
-            if dataset.source_dfs.field2type[field_name] == FeatureType.TOKEN:
-                self.item_token_field_names.append(field_name)
-                self.item_token_field_dims.append(dataset.num(field_name))
-            elif dataset.source_dfs.field2type[field_name] == FeatureType.FLOAT:
-                self.item_float_field_names.append(field_name)
-            else:
-                raise NotImplementedError
-
-    def _get_embedding_tables(self):
-        # user
-        if len(self.user_token_field_dims) > 0:
-            self.user_token_field_offsets = np.array(
-                (0, *np.cumsum(self.user_token_field_dims)[:-1]), dtype=np.long)
-            self.user_token_embedding_table = FMEmbedding(
-                self.user_token_field_dims,
-                self.user_token_field_offsets,
-                self.embedding_size)
-        if len(self.user_float_field_names) > 0:
-            self.user_float_embedding_table = nn.Linear(len(self.user_float_field_names), self.embedding_size)
-
-        # item
-        if len(self.item_token_field_dims) > 0:
-            self.item_token_field_offsets = np.array(
-                (0, *np.cumsum(self.item_token_field_dims)[:-1]), dtype=np.long)
-            self.item_token_embedding_table = FMEmbedding(
-                self.item_token_field_dims,
-                self.item_token_field_offsets,
-                self.embedding_size)
-        if len(self.item_float_field_names) > 0:
-            self.item_float_embedding_table = nn.Linear(len(self.item_float_field_names), self.embedding_size)
-
-    def _embed_item_feat_fields(self):
-        # float fields first，要求物品对应特征源df中，float类型的特征列放最前面，目前药物、检验项目的df都满足要求
-        if len(self.item_float_field_names) > 0:
-            item_dense_embeddings = self.item_float_embedding_table(
-                self.item_features[:, :len(self.item_float_field_names)].float()).unsqueeze(1)
-        else:
-            item_dense_embeddings = None
-        if len(self.item_token_field_names) > 0:
-            item_sparse_embeddings = self.item_token_embedding_table(
-                self.item_features[:, -len(self.item_token_field_names):].long())
-        else:
-            item_sparse_embeddings = None
-
-        if item_dense_embeddings is not None and item_sparse_embeddings is not None:
-            self.embed_item_features = torch.cat([item_dense_embeddings, item_sparse_embeddings], dim=1)
-        else:
-            self.embed_item_features = item_sparse_embeddings if item_sparse_embeddings is not None else item_dense_embeddings
-
-    def _embed_user_feat_fields(self):
-        if len(self.user_float_field_names) > 0:
-            user_dense_embeddings = self.user_float_embedding_table(
-                self.user_features[:, :len(self.user_float_field_names)]).unsqueeze(1)
-        else:
-            user_dense_embeddings = None
-        if len(self.user_token_field_names) > 0:
-            user_sparse_embeddings = self.user_token_embedding_table(
-                self.user_features[:, -len(self.user_token_field_names):])
-        else:
-            user_sparse_embeddings = None
-
-        if user_dense_embeddings is not None and user_sparse_embeddings is not None:
-            self.embed_user_features = torch.cat([user_dense_embeddings, user_sparse_embeddings], dim=1)
-        else:
-            self.embed_user_features = user_sparse_embeddings if user_sparse_embeddings is not None else user_dense_embeddings
-
-    def embed_input_fields(self, user_id, item_seq_next_item):
-        user_embedding = self.embed_user_features[user_id]
+    def embed_input_fields(self, user_id, next_item_item_seq):
+        user_embedding = self._embed_user_feat_fields(user_id)
 
         item_seqs_embedding = []
-        for ids in item_seq_next_item:
+        for ids in next_item_item_seq:
             # L: 当前的item历史序列长度
-            if ids.size(0) > self.max_seq_length + 1:  # 过长则截断
+            L = ids.size(0)
+            if L >= self.max_seq_length + 1:  # 过长则截断
                 ids = ids[:(self.max_seq_length + 1)]
+                valid_ids_feature_embedding = self._embed_item_feat_fields(ids)
+            else:  # 过短则填充padding_idx
+                # 先获取长度内的有效id的特征emb
+                valid_ids_feature_embedding = self._embed_item_feat_fields(ids)
 
-            feat_embedding = self.embed_item_features[ids]  # [L, num_item_feat, h]
-            id_embedding = self.item_id_embedding_table(ids).unsqueeze(1)  # [L, 1, h]
+                # 然后填充pad的部分，再和id_embedding相加
+                pad_size = (0, 0,
+                            0, 0,
+                            0, self.max_seq_length + 1 - L)
+                valid_ids_feature_embedding = fn.pad(valid_ids_feature_embedding, pad_size, value=0)
+                ids = torch.cat([ids,
+                                 torch.tensor([self.item_padding_idx] * (self.max_seq_length + 1 - L), device=self.device)])
 
-            len_cur_seq = feat_embedding.size(0)
-            if len_cur_seq < self.max_seq_length + 1:  # 过短则填充
-                # https://pytorch.org/docs/1.12/generated/torch.nn.functional.pad.html
-                pad_size = (0, 0, 0, 0, 0, self.max_seq_length + 1 - len_cur_seq)
-                feat_embedding = fn.pad(feat_embedding, pad_size, value=-10e6)  # 用一个很小的值，防止在softmax时分走概率
-                id_embedding = fn.pad(id_embedding, pad_size, value=-10e6)
+            ids_embedding = self.item_id_embedding_table(ids).unsqueeze(1)
 
-            # [max_seq_length + 1, (num_item_feat + 1) * h]
-            cur_seq_embedding = torch.cat([feat_embedding, id_embedding], dim=1).flatten(start_dim=1)
-            item_seqs_embedding.append(cur_seq_embedding)
+            item_seqs_embedding.append(torch.cat(
+                [valid_ids_feature_embedding, ids_embedding], dim=1).flatten(start_dim=1))
 
-        item_seqs_embedding = torch.stack(item_seqs_embedding)  # [B, max_seq_length + 1, (num_item_feat + 1) * h]
+        # num_item_float_field == 0: [B, 1 + max_seq_length, (num_item_token_field + 1) * h]
+        # num_item_float_field  > 0: [B, 1 + max_seq_length, (num_item_token_field + 2) * h]
+        item_seqs_embedding = torch.stack(item_seqs_embedding)
 
         return user_embedding, item_seqs_embedding
 
     def forward(self, interaction):
-        user_id      = torch.from_numpy(interaction[self.USER_ID     ].values)
-        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values)
+        user_id      = torch.from_numpy(interaction[self.USER_ID     ].values).to(self.device)
+        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values).to(self.device)
         item_seq     = interaction[self.ITEM_SEQ].values
         next_items   = interaction[self.ITEM_ID ].values
 
-        collector_item_seq_next_item: List[torch.tensor] = []
+        collector_next_item_item_seq: List[torch.tensor] = []
         for history_items, next_item in zip(item_seq, next_items):
             # concatenate the history item seq with the target item to get embedding together
             # 注意：这里将target item放在第一个位置，方便后续split
             item_seq_next_item = torch.tensor([next_item] + history_items, device=self.device)
-            collector_item_seq_next_item.append(item_seq_next_item)
+            collector_next_item_item_seq.append(item_seq_next_item)
 
-        user_embedding, item_seqs_embedding = self.embed_input_fields(user_id, collector_item_seq_next_item)
-
+        user_embedding, item_seqs_embedding = self.embed_input_fields(user_id, collector_next_item_item_seq)
         return user_embedding, item_seqs_embedding

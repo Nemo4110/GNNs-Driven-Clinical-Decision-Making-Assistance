@@ -3,14 +3,18 @@ import sys; sys.path.append("..")
 import pandas as pd
 import os
 import torch
+import torch.utils.data as torchdata
 import random
 import utils.constant as constant
 
 from torch_geometric.data import HeteroData
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
+from typing import List, Dict, Union
+from tqdm import tqdm
+
 from utils.enum_type import FeatureType, FeatureSource
-from typing import List, Dict
+from utils.config import max_adm_length
 
 
 # 各个表的特征列
@@ -510,7 +514,9 @@ class SingleItemType(OneAdm):
 
         # 按天进行负采样
         mix_shards = []
-        for d in pos_shard.day.unique().tolist():
+        days = pos_shard.day.unique().tolist()
+        days = [day for day in days if day < max_adm_length]  # 设置最长住院长度限制
+        for d in days:
             cur_day_pos_shard = gb_day.get_group(d)
 
             pos_items = cur_day_pos_shard['item_id'].values.tolist()
@@ -655,6 +661,7 @@ class SingleItemTypeForSequentialRec(SingleItemType):
 
         collector = []
         days = pos_shard.day.unique().tolist()
+        days = [day for day in days if day < max_adm_length]
         for i, d in enumerate(days):
             if i == 0:
                 continue
@@ -678,7 +685,42 @@ class SingleItemTypeForSequentialRec(SingleItemType):
         return pd.concat(collector, axis=0)
 
 
+class DFDataset(Dataset):
+    r"""供基线模型使用的DataFrame Dataset"""
+    def __init__(self, pre_dataset):
+        self._collect_all_shard(pre_dataset)
+
+    def _collect_all_shard(self, pre_dataset: Union[SingleItemType,
+                                                    SingleItemTypeForContextAwareRec,
+                                                    SingleItemTypeForSequentialRec]):
+        print("> in DFDataset, concat all single admission instances...")
+        # TODO：这部分可以写个脚本，放到预处理步骤里，这样不用每次都跑以下的拼接步骤（因为实际上数据都是一样的）
+        # 遍历，收集，拼成一个大的
+        all_adm_interaction = []
+        for sgl_adm_interaction in tqdm(pre_dataset, leave=False):
+            all_adm_interaction.append(sgl_adm_interaction)
+        self.dataframe = pd.concat(all_adm_interaction, axis=0)
+        print("> done!")
+
+    def __len__(self):
+        return len(self.dataframe)
+
+    def __getitem__(self, idx):
+        # 获取数据行
+        return self.dataframe.iloc[idx]
+
+    @staticmethod
+    def collect_fn(rows):
+        return pd.DataFrame(rows)
+
+
 if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
-    dataset = SingleItemTypeForContextAwareRec(sources_dfs, "val", "labitem")
-    print(dataset[7])
+    pre_dataset = SingleItemTypeForContextAwareRec(sources_dfs, "val", "labitem")
+    itr_dataset = DFDataset(pre_dataset)
+    itr_dataloader = torchdata.DataLoader(
+        itr_dataset, batch_size=256, shuffle=False, pin_memory=True, collate_fn=DFDataset.collect_fn)
+    for interaction in itr_dataloader:
+        print(interaction)
+        break
+
