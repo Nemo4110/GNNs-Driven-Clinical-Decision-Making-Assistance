@@ -6,8 +6,11 @@ import torch
 import torch.utils.data as torchdata
 import random
 import utils.constant as constant
+import torch_geometric.transforms as T
 
 from torch_geometric.data import HeteroData
+from torch_geometric.loader import DataLoader
+from torch_geometric.utils import negative_sampling
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 from typing import List, Dict, Union
@@ -48,7 +51,7 @@ list_selected_prescriptions_columns = [
     "FORM_UNIT_DISP",
     "ROUTE"
 ]
-list_selected_labevents_columns = ['CATAGORY', 'VALUENUM_Z-SCORED']
+list_selected_labevents_columns = ['VALUENUM_Z-SCORED', 'CATAGORY']  # 先float，再token
 
 
 # 上面每个特征列的名称都是唯一的，因此可以全局一个字段，映射特征列名称到相应特征类型
@@ -367,7 +370,7 @@ class OneAdmOneHG(OneAdm):
         # --- get corr tensor shards ---
         # nodes
         mapped_id = self.source_dfs.get_mapped_id('HADM_ID', id)
-        nf_curr_adm = self.source_dfs.feat_admis[mapped_id]
+        nf_curr_adm = self.source_dfs.feat_admis[mapped_id].unsqueeze(0)  # 这里要增加一个维度
 
         nf_items = self.source_dfs.feat_items
         nf_drugs = self.source_dfs.feat_drugs
@@ -432,6 +435,78 @@ class OneAdmOneHG(OneAdm):
         hetero_graph["admission", "took", "drug"].timestep   = edges_timestep_drugs
 
         return hetero_graph
+
+    @staticmethod
+    def split_by_day(hg: HeteroData):
+        hgs = []
+
+        last_lbe_day = hg["admission", "did", "labitem"].timestep.max().int().item()
+        last_pre_day = hg["admission", "took", "drug"].timestep.max().int().item()
+        adm_len = max(last_lbe_day, last_pre_day)
+
+        device = hg["admission", "did", "labitem"].timestep.device
+
+        for cur_day in range(adm_len + 1):
+            sub_hg = HeteroData()
+
+            # NODE (copied directly)
+            for node_type in hg.node_types:
+                sub_hg[node_type].node_id = hg[node_type].node_id.clone()
+                sub_hg[node_type].x = hg[node_type].x.clone().float()
+
+            # Edges
+            for edge_type in hg.edge_types:
+                mask = (hg[edge_type].timestep == cur_day).to(device)
+
+                edge_index = hg[edge_type].edge_index[:, mask]
+                ex = hg[edge_type].x[mask, :]
+
+                sub_hg[edge_type].edge_index = edge_index.clone()
+                sub_hg[edge_type].x = ex.clone().float()
+
+            sub_hg = T.ToUndirected()(sub_hg)
+
+            hgs.append(sub_hg)
+
+        return hgs
+
+    @staticmethod
+    def pack_batch(hgs: List[HeteroData], batch_size: int):
+        r"""
+        Args:
+            hgs:
+            batch_size: how many sub graphs (days) to pack into a batch
+        """
+        loader = DataLoader(hgs, batch_size=batch_size)
+        return next(iter(loader))
+
+    @staticmethod
+    def neg_sample_for_cur_day(pos_indices, num_itm_nodes: int, strategy: int = 2):
+        """
+        Args:
+            strategy: int
+                - 2: 2:1 (neg:pos)
+                - >=10 and < num_itm_nodes: sample `strategy` negative samples
+                - -1: full item set
+        """
+        # 一张图里的病人结点固定为1个
+        num_pos_edges = pos_indices.size(1)
+
+        if num_pos_edges == 0:  # 若当前天没有正样本
+            num_neg_samples = 10  # 保证最少有10个负样本
+        else:
+            if strategy == 2:
+                num_neg_samples = num_pos_edges * 2
+            elif 10 <= strategy < num_itm_nodes:
+                num_neg_samples = strategy
+            elif strategy == -1:
+                num_neg_samples = num_itm_nodes
+            else:
+                raise f"invalid negative sample `strategy` args: {strategy}!"
+
+        neg_indices = negative_sampling(pos_indices, (1, num_itm_nodes), num_neg_samples=num_neg_samples)
+
+        return neg_indices
 
 
 class SingleItemType(OneAdm):

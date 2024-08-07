@@ -3,67 +3,71 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-from torch.nn.utils.rnn import pad_sequence
-from torch_geometric.nn import to_hetero
 from typing import List
+from torch_geometric.nn import to_hetero
 from torch.utils.data.dataloader import DataLoader
 from dataset.hgs import DiscreteTimeHeteroGraph
 from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_seq_to_be_judged_and_01_labels
-from utils.config import HeteroGraphConfig, MappingManager, GNNConfig
-from utils.misc import sequence_mask
-from model.layers import LinksPredictor, SingelGnn
+from dataset.unified import (SourceDataFrames,
+                             OneAdmOneHG,
+                             list_selected_admission_columns,
+                             list_selected_labitems_columns,
+                             list_selected_drug_ndc_columns,
+                             list_selected_labevents_columns,
+                             list_selected_prescriptions_columns)
+from utils.config import HeteroGraphConfig, MappingManager, GNNConfig, max_adm_length
+from utils.enum_type import FeatureType
+from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer
 
 
 class BackBoneV2(nn.Module):
-    def __init__(self, goal: str, h_dim: int, gnn_conf: GNNConfig, device, num_enc_layers: int = 6):
-        """
-        Args:
-            goal:
-                预测目标，药物或检验项目
-            h_dim:
-                hidden dimension
-            gnn_conf:
-                GNN的配置
-            device:
-                在哪个设备上训练
-            num_enc_layers:
-                encoder 层数
-        """
+    def __init__(self,
+                 source_dfs: SourceDataFrames,
+                 goal: str,
+                 h_dim: int,
+                 gnn_conf: GNNConfig,
+                 device,
+                 num_enc_layers: int = 6):
         super().__init__()
+        self.source_dfs = source_dfs  # 提供有用的信息
         assert goal in ["drug", "labitem"]
         self.goal = goal
 
         self.h_dim = h_dim
-        self.gnn_conf = gnn_conf
+        self.gnn_conf = gnn_conf  # 可以用来控制纳入考虑的边类型
         self.device = device
 
         self.node_types = self.gnn_conf.node_types
         self.edge_types = self.gnn_conf.edge_types
 
-        self.med_vocab_size = self.gnn_conf.mapper.node_type_to_node_num['drug']
-        self.itm_vocab_size = self.gnn_conf.mapper.node_type_to_node_num['labitem']
-
-        # Embedding
-        self.d_emb = nn.Embedding(self.med_vocab_size, self.h_dim)  # lab-items
-        self.l_emb = nn.Embedding(self.itm_vocab_size, self.h_dim)  # drugs / medications
-        self.nid_emb = nn.ModuleDict({
-            'labitem': self.l_emb,
-            'drug': self.d_emb
+        self.item_vocab_size = {
+            node_type: self.gnn_conf.mapper.node_type_to_node_num[node_type]
+            for node_type in self.node_types if node_type != "admission"
+        }
+        self.item_id_embedding = nn.ModuleDict({
+            node_type: nn.Embedding(self.item_vocab_size[node_type], self.h_dim)
+            for node_type in self.node_types if node_type != "admission"
         })
-
-        # Projector
-        # - node feature proj
-        self.nf_proj = nn.ModuleDict({
-            node_type: nn.Linear(self.gnn_conf.mapper.node_type_to_node_feat_dim_in[node_type], self.h_dim)
+        self.node_features_embedding = nn.ModuleDict({
+            node_type: GraphEmbeddingLayer(self.h_dim, *self._get_node_feat_dims(node_type))
             for node_type in self.node_types
         })
-        # - edge feature proj
-        self.ef_proj = nn.ModuleDict({
-            "_".join(edge_type): nn.Linear(self.gnn_conf.mapper.edge_type_to_edge_feat_dim_in[edge_type], self.h_dim)
-            for edge_type in self.edge_types
+        self.edge_features_embedding = nn.ModuleDict({
+            "_".join(edge_type): GraphEmbeddingLayer(self.h_dim, *self._get_edge_feat_dims(edge_type))
+            for edge_type in self.edge_types if "rev" not in edge_type[1]
         })
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=8, batch_first=True)
+        # 用于对齐emb完的维度
+        self.node_features_aligner = nn.ModuleDict({
+            node_type: nn.LazyLinear(self.h_dim, bias=False)
+            for node_type in self.node_types
+        })
+        self.edge_features_aligner = nn.ModuleDict({
+            "_".join(edge_type): nn.LazyLinear(self.h_dim, bias=False)
+            for edge_type in self.edge_types if "rev" not in edge_type[1]
+        })
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=2, batch_first=True)
         self.patient_condition_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_enc_layers)
 
         self.gnn = SingelGnn(self.h_dim, self.gnn_conf.gnn_type, self.gnn_conf.gnn_layer_num)
@@ -72,102 +76,155 @@ class BackBoneV2(nn.Module):
         # Final links predictor
         self.lp = LinksPredictor(self.h_dim)
 
-    def forward(self, batch_hgs,
-                batch_seq_to_be_judged: List[List[torch.tensor]],
-                batch_01_labels: List[List[torch.tensor]] = None):
-        B = len(batch_hgs)
-        adm_lens = [len(hgs) for hgs in batch_hgs]
-        max_adm_len = max(adm_lens)
-
-        # 将结点&边特征映射到同一的h_dim维度
-        for hgs in batch_hgs:  # 每个患者
-            for hg in hgs:  # 住院的每天
-                # node feature
-                for node_type in self.node_types:
-                    if node_type != 'admission':
-                        hg[node_type].x = self.nf_proj[node_type](hg[node_type].x.float()) + \
-                                          self.nid_emb[node_type](hg[node_type].node_id)
-                    else:  # adm node (just 1)
-                        hg[node_type].x = self.nf_proj[node_type](hg[node_type].x.float())
-
-                # edge feature
-                for edge_type in self.edge_types:
-                    hg[edge_type].x = self.ef_proj["_".join(edge_type)](hg[edge_type].x.float())
-
-        # 将每个患者每天的图打包成 mini-batch 供GNN处理
-        batch_packed_hgs = [DiscreteTimeHeteroGraph.pack_batch(hgs, len(hgs)) for hgs in batch_hgs]
-
-        batch_packed_x_collection = [packed_hgs.collect('x') for packed_hgs in batch_packed_hgs]
-
-        batch_packed_node_feats_ori = []
-        batch_packed_edge_feats_ori = []
-        for x_collection in batch_packed_x_collection:
-            batch_packed_node_feats_ori.append({k: x for k, x in x_collection.items() if k in self.node_types})
-            batch_packed_edge_feats_ori.append({k: x for k, x in x_collection.items() if k in self.edge_types})
-
-        patients_condition = []  # [B, ?, h_dim]
-        for node_feats_ori, packed_hgs, edge_feats_ori in \
-                zip(batch_packed_node_feats_ori, batch_packed_hgs, batch_packed_edge_feats_ori):  # 遍历病人
-            node_feats_enc = self.gnn(node_feats_ori, packed_hgs.edge_index_dict, edge_feats_ori)  # (?, h_dim)
-            patients_condition.append(node_feats_enc["admission"])  # 此时长度不一，需要PAD
-
-        # PAD
-        patients_condition = pad_sequence(patients_condition, batch_first=True, padding_value=0).to(self.device)
-        padding_mask = sequence_mask(patients_condition, valid_len=torch.tensor(adm_lens, device=self.device))
-
-        subsequent_mask = nn.Transformer.generate_square_subsequent_mask(patients_condition.size(1)).to(self.device)
-        patients_condition = self.patient_condition_encoder(
-            patients_condition, mask=subsequent_mask, src_key_padding_mask=padding_mask)  # (B, max_adm_len, h_dim)
-
-        # 目前先用对应天的患者病情表示 与 对应药物或检验项目的Embedding进行相乘 获取分数
-        logits = []
-        for i in range(B):
-            cur_adm_logits: List[torch.tensor] = []
-            for j in range(adm_lens[i]):  # 遍历住院天
-                cur_day_pc = patients_condition[i, j]  # 当前患者当前天的病情表示（使用之前天的信息）
-                cur_day_seq_emb = self.nid_emb[self.goal](batch_seq_to_be_judged[i][j].to(self.device))
-                cur_day_logits = self.lp(cur_day_pc, cur_day_seq_emb)
-                cur_adm_logits.append(cur_day_logits)
-            logits.append(cur_adm_logits)
-
-        if batch_01_labels is not None:
-            loss = self.get_loss(logits, batch_01_labels)
-            return logits, loss
-
+    def _get_node_feat_dims(self, node_type):
+        if node_type == "admission":
+            fields = list_selected_admission_columns
+        elif node_type == "labitem":
+            fields = list_selected_labitems_columns
+        elif node_type == "drug":
+            fields = list_selected_drug_ndc_columns
         else:
-            return logits
+            raise NotImplementedError
 
-    def get_loss(self, logits, batch_01_labels):
-        total_loss = torch.tensor(0.0).to(self.device)
-        for cur_adm_logits, cur_adm_labels in zip(logits, batch_01_labels):
-            t_cur_adm_logits = torch.cat(cur_adm_logits).to(self.device)
-            t_cur_adm_labels = torch.cat(cur_adm_labels).to(self.device)
-            cur_adm_loss = F.binary_cross_entropy_with_logits(t_cur_adm_logits, t_cur_adm_labels)
-            total_loss += cur_adm_loss
-        return total_loss  # 当前批次的总loss
+        token_field_dims = []
+        float_field_nums = 0
+        for field in fields:
+            if self.source_dfs.field2type[field] == FeatureType.TOKEN:
+                token_field_dims.append(
+                    len(self.source_dfs.tokenfields2mappedid[field])
+                )
+            elif self.source_dfs.field2type[field] == FeatureType.FLOAT:
+                float_field_nums += 1
+            else:
+                raise NotImplementedError
+
+        return token_field_dims, float_field_nums
+
+    def _get_edge_feat_dims(self, edge_type):
+        if edge_type == ('admission', 'did', 'labitem'):
+            fields = list_selected_labevents_columns
+        elif edge_type == ("admission", "took", "drug"):
+            fields = list_selected_prescriptions_columns
+        else:
+            raise NotImplementedError
+
+        token_field_dims = []
+        float_field_nums = 0
+        for field in fields:
+            if self.source_dfs.field2type[field] == FeatureType.TOKEN:
+                token_field_dims.append(
+                    len(self.source_dfs.tokenfields2mappedid[field]))
+            elif self.source_dfs.field2type[field] == FeatureType.FLOAT:
+                float_field_nums += 1
+            else:
+                raise NotImplementedError
+
+        return token_field_dims, float_field_nums
+
+    def forward(self, hg):
+        # emb
+        for node_type in self.node_types:
+            if node_type != "admission":
+                emb_node_features = self.node_features_embedding[node_type](hg[node_type].x)
+                emb_node_id = self.item_id_embedding[node_type](hg[node_type].node_id).unsqueeze(1)
+                emb_features = torch.cat([emb_node_id, emb_node_features], dim=1)
+                emb_features = self.node_features_aligner[node_type](emb_features.flatten(1))
+                hg[node_type].x = emb_features
+            else:  # admission
+                emb_node_features = self.node_features_embedding[node_type](hg[node_type].x)
+                emb_features = self.node_features_aligner[node_type](emb_node_features.flatten(1))
+                hg[node_type].x = emb_features
+
+        for edge_type in self.edge_types:
+            if "rev" in edge_type[1]:  # 没有按时间分划的原始图中，没有反向连接的边，因此不用处理
+                continue
+            else:
+                emb_edge_features = self.edge_features_embedding["_".join(edge_type)](hg[edge_type].x)
+                emb_features = self.edge_features_aligner["_".join(edge_type)](emb_edge_features.flatten(1))
+                hg[edge_type].x = emb_features
+
+        # 按天进行分割，获取离散时间动态图
+        total_hgs = OneAdmOneHG.split_by_day(hg)
+        total_hgs = total_hgs[:max_adm_length]  # 设置最长长度限制
+        hgs = total_hgs[:-1]  # 这里要删除最后一天，因为住院的最后一天没有下一天需要预测了
+
+        # 打包成 mini-batch 供GNN并行处理
+        packed_hgs = OneAdmOneHG.pack_batch(hgs, len(hgs))
+
+        packed_x_collection = packed_hgs.collect('x')
+        packed_node_feats_ori = {k: x for k, x in packed_x_collection.items() if k in self.node_types}
+        packed_edge_feats_ori = {k: x for k, x in packed_x_collection.items() if k in self.edge_types}
+
+        node_feats_enc = self.gnn(packed_node_feats_ori, packed_hgs.edge_index_dict, packed_edge_feats_ori)
+        # 拆分每天的物品特征，每个图的物品结点数量固定
+        item_feats_enc = {
+            node_type: x.view(-1, self.gnn_conf.mapper.node_type_to_node_num[node_type], self.h_dim)
+            for node_type, x in node_feats_enc.items() if (node_type != "admission" and node_type in self.node_types)
+        }
+
+        # attention
+        patient_conditions = node_feats_enc["admission"].unsqueeze(0)
+        subsequent_mask = nn.Transformer.generate_square_subsequent_mask(patient_conditions.size(1)).to(self.device)
+        patient_conditions = self.patient_condition_encoder(patient_conditions, mask=subsequent_mask)
+
+        logits = []
+        labels = []
+        for d, cur_day_hg in enumerate(total_hgs[1:]):  # 这里要扣除第一天，因为我们预测从第二天开始的序列
+            cur_day_patient_conditions = patient_conditions[:, d, :]  # 患者当前天的病情表示，由之前天attention聚合而来
+            cur_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]
+            cur_day_seq_to_be_judged, cur_day_01_labels = self._get_cur_day_seq_to_be_judged_and_labels(cur_day_hg)
+            cur_day_seq_to_be_judged_emb = cur_day_item_feats_enc[cur_day_seq_to_be_judged]  # 取出相应行
+            cur_day_logits = self.lp(cur_day_patient_conditions, cur_day_seq_to_be_judged_emb).squeeze(0)
+            logits.append(cur_day_logits)
+            labels.append(cur_day_01_labels)
+
+        return logits, labels  # 按天收集
+
+    def _get_cur_day_seq_to_be_judged_and_labels(self, hg):
+        r"""获取当天需要判断的物品序列"""
+
+        # STEP 1: 负采样
+        if self.goal == "drug":
+            pos_indices = hg["admission", "took", "drug"].edge_index
+            neg_indices = OneAdmOneHG.neg_sample_for_cur_day(
+                pos_indices, num_itm_nodes=self.gnn_conf.mapper.node_type_to_node_num["drug"])
+        else:  # "labitem"
+            pos_indices = hg["admission", "did", "labitem"].edge_index
+            neg_indices = OneAdmOneHG.neg_sample_for_cur_day(
+                pos_indices, num_itm_nodes=self.gnn_conf.mapper.node_type_to_node_num["labitem"])
+
+        # STEP 2：构建正负序列及标签
+        cur_day_pos = pos_indices[1, :]
+        cur_day_neg = neg_indices[1, :]
+
+        cur_day_seq_to_be_judged = torch.cat([cur_day_pos, cur_day_neg])
+        cur_day_01_labels = torch.cat([torch.ones(cur_day_pos.size(0)),
+                                      torch.zeros(cur_day_neg.size(0))])
+
+        # STEP 3：打乱顺序
+        index_shuffle = torch.randperm(cur_day_01_labels.size(0))
+        cur_day_seq_to_be_judged = cur_day_seq_to_be_judged[index_shuffle].to(self.device)
+        cur_day_01_labels = cur_day_01_labels[index_shuffle].to(self.device)
+
+        return cur_day_seq_to_be_judged, cur_day_01_labels
+
+    @staticmethod
+    def get_loss(logits, labels):
+        logits = torch.cat(logits)
+        labels = torch.cat(labels)
+        return F.binary_cross_entropy_with_logits(logits, labels)
 
 
-if __name__ == "__main__":
-    test_dataset = OneAdmOneHetero(r"..\data", "test")
-    test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collect_hgs, pin_memory=True)
+if __name__ == '__main__':
+    sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
+    dataset = OneAdmOneHG(sources_dfs, "val")
 
+    hidden_dim, device = 32, torch.device('cpu')
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-    model = BackBoneV2("labitem", 64, gnn_conf, torch.device('cpu'))
 
-    for batch in test_dataloader:
-        batch_hgs, adm_lens, \
-            batch_d_seq, batch_d_neg, \
-            batch_l_seq, batch_l_neg = batch
-
-        # 输入要排除住院的最后一天，因为这一天后没有下一天去预测了
-        input_hgs = [hgs[:-1] for hgs in batch_hgs]
-
-        if model.goal == "drug":
-            batch_seq_to_be_judged, batch_01_labels = \
-                get_batch_seq_to_be_judged_and_01_labels(batch_d_seq, batch_d_neg)
-        elif model.goal == "labitem":
-            batch_seq_to_be_judged, batch_01_labels = \
-                get_batch_seq_to_be_judged_and_01_labels(batch_l_seq, batch_l_neg)
-
-        logits, loss = model(input_hgs, batch_seq_to_be_judged, batch_01_labels)
+    model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3)
+    for hg in dataset:
+        logits, labels = model(hg)
+        loss = BackBoneV2.get_loss(logits, labels)
+        break

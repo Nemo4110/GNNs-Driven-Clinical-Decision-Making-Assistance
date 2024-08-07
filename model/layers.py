@@ -786,3 +786,56 @@ class SequentialEmbeddingLayer(BaseEmbeddingLayer):
 
         user_embedding, item_seqs_embedding = self.embed_input_fields(user_id, collector_next_item_item_seq)
         return user_embedding, item_seqs_embedding
+
+
+class GraphEmbeddingLayer(nn.Module):
+    """异质图中，admission, lab item / drug等结点特征通用的embedding layer；边特征也可以复用"""
+    def __init__(self, embedding_size, token_field_dims, float_field_nums):
+        super().__init__()
+        self.embedding_size = embedding_size
+        self.token_field_dims = token_field_dims
+        self.float_field_nums = float_field_nums
+
+        # get embedding tables
+        if len(self.token_field_dims) > 0:
+            self.token_field_offsets = np.array(
+                (0, *np.cumsum(self.token_field_dims)[:-1]), dtype=np.long)
+            self.token_embedding_table = FMEmbedding(
+                self.token_field_dims,
+                self.token_field_offsets,
+                self.embedding_size
+            )
+        if self.float_field_nums > 0:
+            self.float_embedding_table = nn.Linear(self.float_field_nums, self.embedding_size)
+
+    def forward(self, original_features):
+        is_batch = len(original_features.size()) > 1
+        if not is_batch:
+            original_features = original_features.unsqueeze(0)
+
+        # float类型的特征列放最前面，目前药物、检验项目的df都满足要求
+        if self.float_field_nums > 0:
+            dense_embeddings = self.float_embedding_table(
+                original_features[:, :self.float_field_nums].float()
+            ).unsqueeze(1)
+        else:
+            dense_embeddings = None
+
+        if len(self.token_field_dims) > 0:
+            sparse_embeddings = self.token_embedding_table(
+                original_features[:, -len(self.token_field_dims):].long()
+            )
+        else:
+            sparse_embeddings = None
+
+        if dense_embeddings is not None and sparse_embeddings is not None:
+            embeddings = torch.cat([dense_embeddings, sparse_embeddings], dim=1)
+        else:
+            embeddings = sparse_embeddings if sparse_embeddings is not None else dense_embeddings
+
+        if not is_batch:
+            return embeddings.squeeze(0)
+        else:
+            return embeddings
+
+
