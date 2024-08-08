@@ -127,7 +127,6 @@ if __name__ == '__main__':
             loss = net.calculate_loss(interaction)
             optimizer.zero_grad()
             loss.backward()
-            # loss.backward(retain_graph=True)
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=10)
             optimizer.step()
             with torch.no_grad():

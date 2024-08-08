@@ -3,11 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-from typing import List
+from d2l import torch as d2l
 from torch_geometric.nn import to_hetero
-from torch.utils.data.dataloader import DataLoader
-from dataset.hgs import DiscreteTimeHeteroGraph
-from dataset.adm_to_hg import OneAdmOneHetero, collect_hgs, get_batch_seq_to_be_judged_and_01_labels
 from dataset.unified import (SourceDataFrames,
                              OneAdmOneHG,
                              list_selected_admission_columns,
@@ -75,6 +72,21 @@ class BackBoneV2(nn.Module):
 
         # Final links predictor
         self.lp = LinksPredictor(self.h_dim)
+
+        # parameters initialization
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
 
     def _get_node_feat_dims(self, node_type):
         if node_type == "admission":
@@ -219,12 +231,23 @@ if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
     dataset = OneAdmOneHG(sources_dfs, "val")
 
-    hidden_dim, device = 32, torch.device('cpu')
+    hidden_dim, device = 256, torch.device('cpu')
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
 
     model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3)
-    for hg in dataset:
-        logits, labels = model(hg)
-        loss = BackBoneV2.get_loss(logits, labels)
-        break
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+
+    for epoch in range(10):
+        metric = d2l.Accumulator(2)
+        for i, hg in enumerate(dataset):
+            logits, labels = model(hg)
+            loss = BackBoneV2.get_loss(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            with torch.no_grad():
+                metric.add(loss.detach().item(), 1)
+                print(f"iter #{i:05}/{len(dataset):05}, loss: {loss.detach().item():.3f}", flush=True)
+        print(f"epoch #{epoch:02}, loss: {metric[0] / metric[1]:02.3f}")

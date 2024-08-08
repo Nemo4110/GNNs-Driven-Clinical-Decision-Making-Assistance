@@ -209,17 +209,15 @@ class SourceDataFrames:
         self.df_drug_ndc_feat = pd.read_csv(os.path.join(self.path_etl_output, "DRUGS_NDC_FEAT.csv.gz"),             index_col=0, dtype=field2dtype)
         print("> finish loading!")
 
+        # 截断一下最大值最小值
+        self.df_labevents['VALUENUM_Z-SCORED'] = self.df_labevents['VALUENUM_Z-SCORED'].clip(lower=-100., upper=100.)
+
         self.df_admissions.sort_values(by='HADM_ID', inplace=True)
         self.df_labitems.sort_values(by='ITEMID', inplace=True)
         self.df_drug_ndc_feat.sort_values(by='NDC', inplace=True)
 
         self.adm_both = self._filter_out_adm_len_lt_2()
         self.adm_train, self.adm_val, self.adm_test = self._train_val_test_split()
-
-        # groupby hadm_id
-        self.g_admi = self.df_admissions.groupby('HADM_ID')
-        self.g_labe = self.df_labevents.groupby('HADM_ID')
-        self.g_pres = self.df_prescriptions.groupby('HADM_ID')
 
         self.field2type = field2type
         self.field2source = field2source
@@ -238,9 +236,22 @@ class SourceDataFrames:
             if self.field2type[field] == FeatureType.TOKEN:
                 self.df_drug_ndc_feat[field] = self._map_token_field_to_mapped_id(field, self.df_drug_ndc_feat)
 
+        # 同理，行为表的token特征列也需要映射
+        for field in list_selected_labevents_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                self.df_labevents[field] = self._map_token_field_to_mapped_id(field, self.df_labevents)
+        for field in list_selected_prescriptions_columns:
+            if self.field2type[field] == FeatureType.TOKEN:
+                self.df_prescriptions[field] = self._map_token_field_to_mapped_id(field, self.df_prescriptions)
+
         self.feat_admis = torch.from_numpy(self.df_admissions[list_selected_admission_columns].values)
         self.feat_items = torch.from_numpy(self.df_labitems[list_selected_labitems_columns].values)
         self.feat_drugs = torch.from_numpy(self.df_drug_ndc_feat[list_selected_drug_ndc_columns].values)
+
+        # groupby hadm_id
+        self.g_admi = self.df_admissions.groupby('HADM_ID')
+        self.g_labe = self.df_labevents.groupby('HADM_ID')
+        self.g_pres = self.df_prescriptions.groupby('HADM_ID')
 
     def _filter_out_adm_len_lt_2(self):
         """过滤掉住院长度小于2的HADM_ID,也就是说至少要有2天的记录"""
@@ -453,7 +464,7 @@ class OneAdmOneHG(OneAdm):
             # NODE (copied directly)
             for node_type in hg.node_types:
                 sub_hg[node_type].node_id = hg[node_type].node_id.clone()
-                sub_hg[node_type].x = hg[node_type].x.clone().float()
+                sub_hg[node_type].x = hg[node_type].x.clone()
 
             # Edges
             for edge_type in hg.edge_types:
@@ -463,7 +474,7 @@ class OneAdmOneHG(OneAdm):
                 ex = hg[edge_type].x[mask, :]
 
                 sub_hg[edge_type].edge_index = edge_index.clone()
-                sub_hg[edge_type].x = ex.clone().float()
+                sub_hg[edge_type].x = ex.clone()
 
             sub_hg = T.ToUndirected()(sub_hg)
 
