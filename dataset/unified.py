@@ -337,6 +337,7 @@ class OneAdm(Dataset):
 
         assert split in ("train", "test", "val")
         self.source_dfs = source_dfs
+        self.split = split
 
         if split == "train":
             self.admissions = self.source_dfs.adm_train
@@ -763,19 +764,48 @@ class SingleItemTypeForSequentialRec(SingleItemType):
 class DFDataset(Dataset):
     r"""供基线模型使用的DataFrame Dataset"""
     def __init__(self, pre_dataset):
-        self._collect_all_shard(pre_dataset)
+        name = pre_dataset.__class__.__name__
+        split = pre_dataset.split
+        self.dataframe = self._get_preprocessed(name, split)  # 如果处理过，就直接加载
+
+        if self.dataframe is None:
+            self._collect_all_shard(pre_dataset)
+            self._save(name, split)
 
     def _collect_all_shard(self, pre_dataset: Union[SingleItemType,
                                                     SingleItemTypeForContextAwareRec,
                                                     SingleItemTypeForSequentialRec]):
         print("> in DFDataset, concat all single admission instances...")
-        # TODO：这部分可以写个脚本，放到预处理步骤里，这样不用每次都跑以下的拼接步骤（因为实际上数据都是一样的）
         # 遍历，收集，拼成一个大的
         all_adm_interaction = []
         for sgl_adm_interaction in tqdm(pre_dataset, leave=False):
             all_adm_interaction.append(sgl_adm_interaction)
         self.dataframe = pd.concat(all_adm_interaction, axis=0)
         print("> done!")
+
+    def _get_preprocessed(self, name, split):
+        data_folder = self._get_data_folder(name)
+        filename = os.path.join(data_folder, f"{split}.csv.gz")
+        if os.path.isfile(filename):
+            return pd.read_csv(filename, index_col=0)
+        else:
+            return None
+
+    def _save(self, name, split):
+        data_folder = self._get_data_folder(name)
+        os.makedirs(data_folder, exist_ok=True)
+        filename = os.path.join(data_folder, f"{split}.csv.gz")
+        self.dataframe.to_csv(filename, compression='gzip')
+
+    def _get_data_folder(self, name):
+        current_dir = os.path.basename(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+        if current_dir in ["dataset", "model", "notebook"]:
+            data_folder = os.path.join("..", "data", name)
+        else:
+            data_folder = os.path.join("data", name)
+        return data_folder
 
     def __len__(self):
         return len(self.dataframe)
