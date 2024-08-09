@@ -527,7 +527,7 @@ class SingleItemType(OneAdm):
         super(SingleItemType, self).__init__(source_dfs, split)
         self.item_type = item_type
         if self.item_type == "labitem":
-            self.interaction = self.source_dfs.df_labevents
+            self.interaction = self.source_dfs.df_labevents.copy()
             self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "CHARTTIME", "ROW_ID"], inplace=True)
             self._prep_interaction(
                 self.interaction,
@@ -545,7 +545,7 @@ class SingleItemType(OneAdm):
             self.item_feat_fields = list_selected_labitems_columns
             self.item_feat_values = self.source_dfs.feat_items
         elif self.item_type == "drug":
-            self.interaction = self.source_dfs.df_prescriptions
+            self.interaction = self.source_dfs.df_prescriptions.copy()
             self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"], inplace=True)
             self.interaction = self._prep_interaction(
                 self.interaction,
@@ -626,13 +626,20 @@ class SingleItemType(OneAdm):
         #       0,       5,     1,    0
         #       0,      11,     1,    1
         #       0,     225,     0,    2
-        return pd.concat(mix_shards, axis=0)
+        return pd.concat(mix_shards, axis=0) if len(mix_shards) > 0 else pd.DataFrame()
 
     def __getitem__(self, idx):
         uid = self.admissions[idx]
         mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
         pos_shard = self.gb_uid.get_group(mappedid)
-        interaction = self._all_day_neg_samples(pos_shard, mappedid)
+        if len(pos_shard) > 0:
+            interaction = self._all_day_neg_samples(pos_shard, mappedid)
+            if len(interaction) == 0:
+                return interaction
+            else:
+                pass
+        else:
+            interaction = pd.DataFrame()  # Empty
 
         return interaction
 
@@ -705,10 +712,14 @@ class SingleItemTypeForContextAwareRec(SingleItemType):
         uid = self.admissions[idx]
         mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
         pos_shard = self.gb_uid.get_group(mappedid)
-
-        interaction = self._all_day_neg_samples(pos_shard, mappedid)
-        interaction = self._concat_corr_user_item_feat(interaction)
-
+        if len(pos_shard) > 0:
+            interaction = self._all_day_neg_samples(pos_shard, mappedid)
+            if len(interaction) == 0:  # 没东西
+                return interaction
+            else:
+                interaction = self._concat_corr_user_item_feat(interaction)
+        else:
+            interaction = pd.DataFrame()  # Empty
         return interaction
 
     def _concat_corr_user_item_feat(self, interaction):
@@ -735,10 +746,14 @@ class SingleItemTypeForSequentialRec(SingleItemType):
         uid = self.admissions[idx]
         mappedid = self.source_dfs.get_mapped_id('HADM_ID', uid)
         pos_shard = self.gb_uid.get_group(mappedid)
-
-        interaction = self._all_day_neg_samples(pos_shard, mappedid)
-        interaction = self._add_history_seq(pos_shard, interaction)
-
+        if len(pos_shard) > 0:
+            interaction = self._all_day_neg_samples(pos_shard, mappedid)
+            if len(interaction) == 0:
+                return interaction
+            else:
+                interaction = self._add_history_seq(pos_shard, interaction)
+        else:
+            interaction = pd.DataFrame()  # Empty
         return interaction
 
     def _add_history_seq(self, pos_shard, interaction):
@@ -789,7 +804,7 @@ class DFDataset(Dataset):
         print("> in DFDataset, concat all single admission instances...")
         # 遍历，收集，拼成一个大的
         all_adm_interaction = []
-        for sgl_adm_interaction in tqdm(pre_dataset, leave=False):
+        for sgl_adm_interaction in tqdm(pre_dataset, leave=False, ncols=80):
             all_adm_interaction.append(sgl_adm_interaction)
         self.dataframe = pd.concat(all_adm_interaction, axis=0)
         print("> done!")
@@ -798,7 +813,7 @@ class DFDataset(Dataset):
         data_folder = self._get_data_folder(name)
         filename = os.path.join(data_folder, f"{split}.csv.gz")
         if os.path.isfile(filename):
-            return pd.read_csv(filename, index_col=0)
+            return pd.read_csv(filename, index_col=0, dtype={"history": "string"})
         else:
             return None
 
@@ -809,14 +824,7 @@ class DFDataset(Dataset):
         self.dataframe.to_csv(filename, compression='gzip')
 
     def _get_data_folder(self, name):
-        current_dir = os.path.basename(
-            os.path.dirname(os.path.abspath(__file__))
-        )
-        if current_dir in ["dataset", "model", "notebook"]:
-            data_folder = os.path.join("..", "data", name)
-        else:
-            data_folder = os.path.join("data", name)
-        return data_folder
+        return os.path.join("data", name)  # 正确前提：运行于项目一级目录下的主脚本
 
     def __len__(self):
         return len(self.dataframe)
@@ -827,7 +835,11 @@ class DFDataset(Dataset):
 
     @staticmethod
     def collect_fn(rows):
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+        if 'history' in df.columns:
+            df['history'] = df['history'].astype("string")
+            df['history'] = df['history'].apply(eval)
+        return df
 
 
 if __name__ == '__main__':

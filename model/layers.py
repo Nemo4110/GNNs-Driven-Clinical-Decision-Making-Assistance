@@ -529,8 +529,8 @@ class GeneralEmbeddingLayer(BaseEmbeddingLayer):
         self.n_items = dataset.num_items
         self.item_id_embedding_table = nn.Embedding(self.n_items, self.embedding_size)
 
-        self.user_features = dataset.user_feat_values
-        self.item_features = dataset.item_feat_values
+        self.user_features = dataset.user_feat_values.to(self.device)
+        self.item_features = dataset.item_feat_values.to(self.device)
 
         self._get_fields_names_dims(dataset)
         self._get_embedding_tables()
@@ -637,7 +637,7 @@ class ContextEmbeddingLayer(BaseEmbeddingLayer):
             cur_float_field_tensor = torch.from_numpy(cur_float_field_values).unsqueeze(1)
             float_fields.append(cur_float_field_tensor)
         if len(float_fields) > 0:
-            float_fields = torch.cat(float_fields, dim=1).float()  # [batch_size, num_float_field]
+            float_fields = torch.cat(float_fields, dim=1).float().to(self.device)  # [batch_size, num_float_field]
         else:
             float_fields = None
         # float fields 过一层全连接层转换到self.embedding_size
@@ -651,7 +651,7 @@ class ContextEmbeddingLayer(BaseEmbeddingLayer):
             cur_token_field_tensor = torch.from_numpy(cur_token_field_values).unsqueeze(1)
             token_fields.append(cur_token_field_tensor)
         if len(token_fields) > 0:
-            token_fields = torch.cat(token_fields, dim=1).long()  # [batch_size, num_token_field]
+            token_fields = torch.cat(token_fields, dim=1).long().to(self.device)  # [batch_size, num_token_field]
         else:
             token_fields = None
         sparse_embedding = self.embed_token_fields(token_fields)  # [batch_size, num_token_field, embed_dim] or None
@@ -732,8 +732,8 @@ class SequentialEmbeddingLayer(BaseEmbeddingLayer):
         self.item_id_embedding_table = nn.Embedding(
             self.n_items + 1, self.embedding_size, padding_idx=self.item_padding_idx)
 
-        self.user_features = dataset.user_feat_values
-        self.item_features = dataset.item_feat_values
+        self.user_features = dataset.user_feat_values.to(self.device)
+        self.item_features = dataset.item_feat_values.to(self.device)
 
         self._get_fields_names_dims(dataset)
         self._get_embedding_tables()

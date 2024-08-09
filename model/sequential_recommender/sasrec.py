@@ -93,7 +93,7 @@ class SASRec(SequentialRecommender):
         input_emb = self.LayerNorm(input_emb)
         input_emb = self.dropout(input_emb)
 
-        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values)
+        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values).to(self.device)
 
         padding_mask = self.mask_mat.repeat(B, 1)
         padding_mask = padding_mask >= item_seq_len.unsqueeze(1)  # padding mask
@@ -111,7 +111,8 @@ class SASRec(SequentialRecommender):
         return scores.squeeze(1)
 
     def calculate_loss(self, interaction):
-        label = torch.from_numpy(interaction[self.LABEL_FIELD].values).float()
+        label = torch.from_numpy(interaction[self.LABEL_FIELD].values)\
+            .float().to(self.device)
         output = self.forward(interaction)
         loss = self.loss_fct(output, label)
         return loss

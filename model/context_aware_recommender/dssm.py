@@ -67,7 +67,8 @@ class DSSM(ContextRecommender):
         return score.squeeze(-1)
 
     def calculate_loss(self, interaction):
-        label = torch.from_numpy(interaction[self.LABEL].values).float()
+        label = torch.from_numpy(interaction[self.LABEL].values)\
+            .float().to(self.device)
         output = self.forward(interaction)
         return self.loss(output, label)
 

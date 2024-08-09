@@ -64,7 +64,7 @@ class DIN(SequentialRecommender):
         target_item_feat_emb = target_item_feat_emb.squeeze(1)
 
         # attention
-        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values)
+        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values).to(self.device)
         user_emb = self.attention(target_item_feat_emb, history_item_feat_emd, item_seq_len)
         user_emb = user_emb.squeeze(1)
 
@@ -78,7 +78,8 @@ class DIN(SequentialRecommender):
         return preds.squeeze(1)
 
     def calculate_loss(self, interaction):
-        label = torch.from_numpy(interaction[self.LABEL_FIELD].values).float()
+        label = torch.from_numpy(interaction[self.LABEL_FIELD].values)\
+            .float().to(self.device)
         output = self.forward(interaction)
         loss = self.loss(output, label)
         return loss
