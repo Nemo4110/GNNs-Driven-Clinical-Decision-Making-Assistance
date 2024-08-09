@@ -64,7 +64,7 @@ class BackBoneV2(nn.Module):
             for edge_type in self.edge_types if "rev" not in edge_type[1]
         })
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=2, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=8, batch_first=True)
         self.patient_condition_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_enc_layers)
 
         self.gnn = SingelGnn(self.h_dim, self.gnn_conf.gnn_type, self.gnn_conf.gnn_layer_num)
@@ -158,16 +158,17 @@ class BackBoneV2(nn.Module):
         # 按天进行分割，获取离散时间动态图
         total_hgs = OneAdmOneHG.split_by_day(hg)
         total_hgs = total_hgs[:max_adm_length]  # 设置最长长度限制
-        hgs = total_hgs[:-1]  # 这里要删除最后一天，因为住院的最后一天没有下一天需要预测了
 
         # 打包成 mini-batch 供GNN并行处理
-        packed_hgs = OneAdmOneHG.pack_batch(hgs, len(hgs))
+        packed_hgs = OneAdmOneHG.pack_batch(total_hgs, len(total_hgs))
 
         packed_x_collection = packed_hgs.collect('x')
         packed_node_feats_ori = {k: x for k, x in packed_x_collection.items() if k in self.node_types}
         packed_edge_feats_ori = {k: x for k, x in packed_x_collection.items() if k in self.edge_types}
 
+        # 这里面有batch norm，这也是为什么至少要有2天及以上的住院时长（确保batch_size > 1）
         node_feats_enc = self.gnn(packed_node_feats_ori, packed_hgs.edge_index_dict, packed_edge_feats_ori)
+
         # 拆分每天的物品特征，每个图的物品结点数量固定
         item_feats_enc = {
             node_type: x.view(-1, self.gnn_conf.mapper.node_type_to_node_num[node_type], self.h_dim)
@@ -182,11 +183,11 @@ class BackBoneV2(nn.Module):
         logits = []
         labels = []
         for d, cur_day_hg in enumerate(total_hgs[1:]):  # 这里要扣除第一天，因为我们预测从第二天开始的序列
-            cur_day_patient_conditions = patient_conditions[:, d, :]  # 患者当前天的病情表示，由之前天attention聚合而来
-            cur_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]
+            pre_day_patient_conditions = patient_conditions[:, d, :]  # 前一天的病情表示，由之前天attention聚合而来
+            pre_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]  # 前一天的物品emb
             cur_day_seq_to_be_judged, cur_day_01_labels = self._get_cur_day_seq_to_be_judged_and_labels(cur_day_hg)
-            cur_day_seq_to_be_judged_emb = cur_day_item_feats_enc[cur_day_seq_to_be_judged]  # 取出相应行
-            cur_day_logits = self.lp(cur_day_patient_conditions, cur_day_seq_to_be_judged_emb).squeeze(0)
+            cur_day_seq_to_be_judged_emb = pre_day_item_feats_enc[cur_day_seq_to_be_judged]  # 取出相应行
+            cur_day_logits = self.lp(pre_day_patient_conditions, cur_day_seq_to_be_judged_emb).squeeze(0)
             logits.append(cur_day_logits)
             labels.append(cur_day_01_labels)
 
@@ -233,7 +234,7 @@ if __name__ == '__main__':
 
     hidden_dim, device = 256, torch.device('cpu')
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
-    gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
+    gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)
 
     model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
