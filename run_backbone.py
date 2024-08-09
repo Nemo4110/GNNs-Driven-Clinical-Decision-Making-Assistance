@@ -7,6 +7,7 @@ import utils.constant as constant
 
 from d2l import torch as d2l
 from typing import List
+from tqdm import tqdm
 
 from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
@@ -67,7 +68,8 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
             train_metric = d2l.Accumulator(2)  # train loss, iter num
             model.train()
-            for i, hg in enumerate(train_dataset):
+            train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=80, total=len(train_dataset))
+            for i, hg in train_loop:
                 hg = hg.to(device)
                 logits, labels = model(hg)
                 loss = BackBoneV2.get_loss(logits, labels)
@@ -77,8 +79,7 @@ if __name__ == '__main__':
                 optimizer.step()
                 with torch.no_grad():
                     train_metric.add(loss.detach().item(), 1)
-                    print(f'#{i/len(train_dataset)*100:02.3f}%, '
-                          f'train loss: {loss.item():.4f}', end='\r')
+                    train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
             print(f"epoch #{epoch:02}, train loss: {train_metric[0] / train_metric[1]:.4f}")
 
             if args.use_gpu:
@@ -86,12 +87,12 @@ if __name__ == '__main__':
             valid_metric = d2l.Accumulator(2)
             model.eval()
             with torch.no_grad():
-                for i, hg in enumerate(valid_dataset):
+                valid_loop = tqdm(enumerate(valid_dataset), leave=False, ncols=80, total=len(valid_dataset))
+                for i, hg in valid_loop:
                     logits, labels = model(hg)
                     loss = BackBoneV2.get_loss(logits, labels)
-                    valid_metric.add(loss.detach().item(), 1)
-                    print(f'#{i/len(valid_dataset)*100:02.3f}%, '
-                          f'valid loss: {loss.item():.4f}', end='\r')
+                    valid_metric.add(loss.item(), 1)
+                    valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
                 valid_loss = valid_metric[0] / valid_metric[1]
                 print(f"epoch #{epoch:02}, valid loss: {valid_loss:.4f}")
 
@@ -121,7 +122,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for idx, hg in enumerate(test_dataset):
+            for idx, hg in tqdm(enumerate(test_dataset), leave=False, ncols=80, total=len(test_dataset)):
                 hg = hg.to(device)
                 logits, labels = model(hg)
 
