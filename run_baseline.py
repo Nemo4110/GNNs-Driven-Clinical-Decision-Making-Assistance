@@ -7,6 +7,7 @@ import utils.constant as constant
 
 from typing import Dict, List
 from d2l import torch as d2l
+from tqdm import tqdm
 from model import context_aware_recommender, general_recommender, sequential_recommender
 from dataset.unified import (SourceDataFrames,
                              SingleItemType,
@@ -73,16 +74,16 @@ if __name__ == '__main__':
     parser.add_argument("--train", action="store_true", default=False)
     parser.add_argument("--test", action="store_true", default=False)
 
-    parser.add_argument("--hidden_dim", type=int, default=256)
+    parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--dropout_prob", type=float, default=0.1)
     parser.add_argument("--max_seq_length", type=int, default=50)
 
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--use_gpu", action="store_true", default=False)
     parser.add_argument("--batch_size", type=int, default=8192)  # adjustable
 
-    parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_HGS_OUTPUT)
+    parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT)
     parser.add_argument("--path_dir_model_hub", default=r"./model/hub")
     parser.add_argument("--path_dir_results", default=r"./results")
     parser.add_argument("--model_ckpt", default=None)
@@ -116,7 +117,8 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
             train_metric = d2l.Accumulator(2)  # train loss, batch number counter
             model.train()
-            for i, interaction in enumerate(train_dataloader):
+            train_loop = tqdm(train_dataloader, leave=False, ncols=80, total=len(train_dataloader))
+            for interaction in train_loop:
                 loss = model.calculate_loss(interaction)
                 optimizer.zero_grad()
                 loss.backward()
@@ -124,8 +126,7 @@ if __name__ == '__main__':
                 optimizer.step()
                 with torch.no_grad():
                     train_metric.add(loss.item(), 1)
-                    print(f'#{i/len(train_dataloader)*100:02.3f}%, '
-                          f'train loss: {loss.item():.4f}', end='\r')
+                    train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
             print(f"epoch #{epoch:02}, train loss: {train_metric[0] / train_metric[1]:.4f}")
 
             if args.use_gpu:
@@ -133,11 +134,11 @@ if __name__ == '__main__':
             valid_metric = d2l.Accumulator(2)
             model.eval()
             with torch.no_grad():
-                for i, interaction in enumerate(valid_dataloader):
+                valid_loop = tqdm(valid_dataloader, leave=False, ncols=80, total=len(valid_dataloader))
+                for interaction in valid_loop:
                     loss = model.calculate_loss(interaction)
                     valid_metric.add(loss.item(), 1)
-                    print(f'#{i/len(valid_dataloader)*100:02.3f}%, '
-                          f'valid loss: {loss.item():.4f}', end='\r')
+                    valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
                 valid_loss = valid_metric[0] / valid_metric[1]
                 print(f"epoch #{epoch:02}, valid loss: {valid_loss:.4f}")
 
@@ -171,7 +172,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for i, interaction in enumerate(test_dataloader):
+            for interaction in tqdm(test_dataloader, leave=False, ncols=80):
                 scores = model.predict(interaction)
                 interaction['score'] = scores.cpu().tolist()
                 collector.append(interaction)

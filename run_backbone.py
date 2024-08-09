@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument("--gnn_layer_num",                type=int,   default=3)
     parser.add_argument("--num_encoder_layers",           type=int,   default=3)
     parser.add_argument("--decoder_choice",                           default="TransformerDecoder")
-    parser.add_argument("--hidden_dim",                   type=int,   default=256)
+    parser.add_argument("--hidden_dim",                   type=int,   default=64)
     parser.add_argument("--lr",                           type=float, default=0.001)
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="whether to only use GNN")
     # TODO: 增加只使用GNN的模型（消融）
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     # Experiment settings
     parser.add_argument("--item_type",                              default="MIX")
     parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
-    parser.add_argument("--epochs",                       type=int, default=5)
+    parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False)
     parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
@@ -68,8 +68,8 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
             train_metric = d2l.Accumulator(2)  # train loss, iter num
             model.train()
-            train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=80, total=len(train_dataset))
-            for i, hg in train_loop:
+            train_loop = tqdm(train_dataset, leave=False, ncols=80, total=len(train_dataset))
+            for hg in train_loop:
                 hg = hg.to(device)
                 logits, labels = model(hg)
                 loss = BackBoneV2.get_loss(logits, labels)
@@ -87,8 +87,9 @@ if __name__ == '__main__':
             valid_metric = d2l.Accumulator(2)
             model.eval()
             with torch.no_grad():
-                valid_loop = tqdm(enumerate(valid_dataset), leave=False, ncols=80, total=len(valid_dataset))
-                for i, hg in valid_loop:
+                valid_loop = tqdm(valid_dataset, leave=False, ncols=80, total=len(valid_dataset))
+                for hg in valid_loop:
+                    hg = hg.to(device)
                     logits, labels = model(hg)
                     loss = BackBoneV2.get_loss(logits, labels)
                     valid_metric.add(loss.item(), 1)
@@ -122,7 +123,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for idx, hg in tqdm(enumerate(test_dataset), leave=False, ncols=80, total=len(test_dataset)):
+            for hg in tqdm(test_dataset, leave=False, ncols=80, total=len(test_dataset)):
                 hg = hg.to(device)
                 logits, labels = model(hg)
 

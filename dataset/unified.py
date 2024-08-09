@@ -838,8 +838,17 @@ class DFDataset(Dataset):
         df = pd.DataFrame(rows)
         if 'history' in df.columns:
             df['history'] = df['history'].astype("string")
-            df['history'] = df['history'].apply(eval)
+            df['history'] = df['history'].apply(string2list)
         return df
+
+
+# https://stackoverflow.com/questions/69959719
+def string2list(row_value):
+    list_str = row_value.strip('][').replace('"', '').split(',')
+    if len(list_str) > 0 and list_str[0] != '':
+        return list(map(int, list_str))
+    else:
+        return []
 
 
 if __name__ == '__main__':
