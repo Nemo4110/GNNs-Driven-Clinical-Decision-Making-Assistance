@@ -22,11 +22,10 @@ if __name__ == '__main__':
 
     # following arguments are model settings
     parser.add_argument("--gnn_type",                                 default="GENConv")
-    parser.add_argument("--gnn_layer_num",                type=int,   default=3)
-    parser.add_argument("--num_encoder_layers",           type=int,   default=3)
-    parser.add_argument("--decoder_choice",                           default="TransformerDecoder")
-    parser.add_argument("--hidden_dim",                   type=int,   default=64)
-    parser.add_argument("--lr",                           type=float, default=0.001)
+    parser.add_argument("--gnn_layer_num",                type=int,   default=2)
+    parser.add_argument("--num_encoder_layers",           type=int,   default=6)
+    parser.add_argument("--hidden_dim",                   type=int,   default=512)
+    parser.add_argument("--lr",                           type=float, default=0.0003)
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="whether to only use GNN")
     # TODO: 增加只使用GNN的模型（消融）
 
@@ -45,7 +44,6 @@ if __name__ == '__main__':
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
     parser.add_argument("--model_ckpt",                             default=None,      help="the .pt filename where stores the state_dict of model")
     parser.add_argument("--use_gpu",          action="store_true",  default=False)
-    parser.add_argument("--batch_size",                   type=int, default=32)
 
     args = parser.parse_args()
 
