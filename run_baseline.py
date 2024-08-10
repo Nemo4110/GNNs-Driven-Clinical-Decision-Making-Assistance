@@ -79,7 +79,7 @@ if __name__ == '__main__':
     parser.add_argument("--max_seq_length", type=int, default=50)
 
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--epochs", type=int, default=3)
+    # parser.add_argument("--epochs", type=int, default=3)  # 不需要——由于训练集非常大，单次遍历足够，且多epochs耗时太长了
     parser.add_argument("--use_gpu", action="store_true", default=False)
     parser.add_argument("--batch_size", type=int, default=8192)  # adjustable
 
@@ -110,42 +110,39 @@ if __name__ == '__main__':
             shuffle=False, pin_memory=True, collate_fn=DFDataset.collect_fn)
 
         model = model_class(config, train_pre_dataset).to(device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
-        for epoch in range(args.epochs):
-            if args.use_gpu:
-                torch.cuda.empty_cache()
-            train_metric = d2l.Accumulator(2)  # train loss, batch number counter
-            model.train()
-            train_loop = tqdm(train_dataloader, leave=False, ncols=80, total=len(train_dataloader))
-            for interaction in train_loop:
-                loss = model.calculate_loss(interaction)
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-                with torch.no_grad():
-                    train_metric.add(loss.item(), 1)
-                    train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
-            print(f"epoch #{epoch:02}, train loss: {train_metric[0] / train_metric[1]:.4f}")
-
-            if args.use_gpu:
-                torch.cuda.empty_cache()
-            valid_metric = d2l.Accumulator(2)
-            model.eval()
-            with torch.no_grad():
-                valid_loop = tqdm(valid_dataloader, leave=False, ncols=80, total=len(valid_dataloader))
-                for interaction in valid_loop:
-                    loss = model.calculate_loss(interaction)
-                    valid_metric.add(loss.item(), 1)
-                    valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
-                valid_loss = valid_metric[0] / valid_metric[1]
-                print(f"epoch #{epoch:02}, valid loss: {valid_loss:.4f}")
-
         path2save = os.path.join(args.path_dir_model_hub, model_class.__bases__[0].__name__, model_class.__name__)
         os.makedirs(path2save, exist_ok=True)
-        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
-        torch.save(model.state_dict(), os.path.join(path2save, model_name))
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+        min_loss = float("inf")
+
+        train_metric = d2l.Accumulator(2)  # train loss, batch number counter
+        model.train()
+        train_loop = tqdm(enumerate(train_dataloader), leave=False, ncols=80, total=len(train_dataloader))
+        for i, interaction in train_loop:
+            loss = model.calculate_loss(interaction)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            with torch.no_grad():
+                train_metric.add(loss.item(), 1)
+                train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
+
+                # 每遍历完训练集的10%或最后一个，在验证集上计算下loss
+                if (i % (len(train_dataloader) // 10)) == 0 or i == len(train_dataloader) - 1:
+                    valid_metric = d2l.Accumulator(2)
+                    model.eval()
+                    valid_loop = tqdm(valid_dataloader, leave=False, ncols=80, total=len(valid_dataloader))
+                    for val_interaction in valid_loop:
+                        loss = model.calculate_loss(val_interaction)
+                        valid_metric.add(loss.item(), 1)
+                        valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
+                    valid_loss = valid_metric[0] / valid_metric[1]
+                    print(f"avg. valid loss: {valid_loss:.4f}")
+                    if valid_loss < min_loss:  # 有更小的valid_loss了，保存一下checkpoint
+                        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
+                        torch.save(model.state_dict(), os.path.join(path2save, model_name))
+                    model.train()  # 退出时恢复下train模式
+        print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
 
     if args.test:
         test_pre_dataset = dataset_class(sources_dfs, "test", args.goal)
