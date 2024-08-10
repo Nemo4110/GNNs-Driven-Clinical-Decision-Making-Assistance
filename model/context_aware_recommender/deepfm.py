@@ -17,7 +17,9 @@ class DeepFM(ContextRecommender):
 
         # define layers and loss
         self.fm = BaseFactorizationMachine(reduce_sum=True)
-        size_list = [self.embedding_size * self.embedding_layer.num_feature_field] + self.mlp_hidden_size
+        size_list = [self.embedding_size * (
+                len(self.embedding_layer.token_field_names) + (len(self.embedding_layer.float_field_names) > 0)
+        )] + self.mlp_hidden_size
         self.mlp_layers = MLPLayers(size_list, self.dropout_prob)
         self.deep_predict_layer = nn.Linear(self.mlp_hidden_size[-1], 1)  # Linear product to the final score
         self.sigmoid = nn.Sigmoid()

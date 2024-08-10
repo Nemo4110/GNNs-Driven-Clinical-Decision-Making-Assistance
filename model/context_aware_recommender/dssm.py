@@ -17,8 +17,8 @@ class DSSM(ContextRecommender):
         self.mlp_hidden_size = config["mlp_hidden_size"]
         self.dropout_prob = config["dropout_prob"]
 
-        self.user_feature_num = (self.embedding_layer.user_token_field_num + self.embedding_layer.user_float_field_num)
-        self.item_feature_num = (self.embedding_layer.item_token_field_num + self.embedding_layer.item_float_field_num)
+        self.user_feature_num = (self.embedding_layer.user_token_field_num + (self.embedding_layer.user_float_field_num > 0))
+        self.item_feature_num = (self.embedding_layer.item_token_field_num + (self.embedding_layer.item_float_field_num > 0))
 
         # define layers and loss
         user_size_list = [self.embedding_size * self.user_feature_num] + self.mlp_hidden_size

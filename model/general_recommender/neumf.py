@@ -31,18 +31,13 @@ class NeuMF(GeneralRecommender):
             normal_(module.weight.data, mean=0.0, std=0.01)
 
     def forward(self, interaction):
-        user = torch.from_numpy(interaction[self.USER_ID].values)
-        item = torch.from_numpy(interaction[self.ITEM_ID].values)
+        user_e, item_e = self.embedding_layer(interaction)
 
-        user_mf_e = self.embedding_layer.embed_user_features[user].flatten(start_dim=1)
-        item_mf_e = self.embedding_layer.embed_item_features[item].flatten(start_dim=1)
-        user_mlp_e = self.embedding_layer.embed_user_features[user].flatten(start_dim=1)
-        item_mlp_e = self.embedding_layer.embed_item_features[item].flatten(start_dim=1)
+        user_mf_e = self.uf_aligner(user_e.flatten(start_dim=1))
+        item_mf_e = self.if_aligner(item_e.flatten(start_dim=1))
 
-        user_mf_e = self.uf_aligner(user_mf_e)
-        item_mf_e = self.if_aligner(item_mf_e)
-        user_mlp_e = self.uf_aligner(user_mlp_e)
-        item_mlp_e = self.if_aligner(item_mlp_e)
+        user_mlp_e = self.uf_aligner(user_e.flatten(start_dim=1))
+        item_mlp_e = self.if_aligner(item_e.flatten(start_dim=1))
 
         mf_output = torch.mul(user_mf_e, item_mf_e)  # [batch_size, embedding_size]
         mlp_output = self.mlp_layers(torch.cat((user_mlp_e, item_mlp_e), -1))  # [batch_size, layers[-1]]
@@ -51,7 +46,7 @@ class NeuMF(GeneralRecommender):
         return output.squeeze(-1)
 
     def calculate_loss(self, interaction):
-        label = torch.from_numpy(interaction[self.LABEL].values).float()
+        label = torch.from_numpy(interaction[self.LABEL].values).float().to(self.device)
         output = self.forward(interaction)
         return self.loss(output, label)
 

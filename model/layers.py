@@ -686,8 +686,8 @@ class ContextEmbeddingLayer(BaseEmbeddingLayer):
         sparse_embedding, dense_embedding = self.embed_input_fields(interaction)
 
         if dense_embedding is not None:
-            first_dense_embedding, second_dense_embedding = torch.split(dense_embedding,
-                [self.user_float_field_num, self.item_float_field_num], dim=1)
+            first_dense_embedding = None  # mimic-iii 中，user特征列没有float类型
+            second_dense_embedding = dense_embedding
         else:
             first_dense_embedding, second_dense_embedding = None, None
 

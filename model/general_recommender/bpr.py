@@ -27,8 +27,9 @@ class BPR(GeneralRecommender):
         pos_user_e, pos_item_e = self.forward(pos_shard)
         neg_user_e, neg_item_e = self.forward(neg_shard)
 
-        pos_item_score = torch.mul(pos_user_e, pos_item_e).sum(dim=1).repeat(2)  # 2：1负采样策略
-        neg_item_score = torch.mul(neg_user_e, neg_item_e).sum(dim=1)
+        less_size = min(pos_item_e.size(0) * 2, neg_item_e.size(0))
+        pos_item_score = torch.mul(pos_user_e, pos_item_e).sum(dim=1).repeat(2)[:less_size]  # 2：1负采样策略
+        neg_item_score = torch.mul(neg_user_e, neg_item_e).sum(dim=1)[:less_size]
 
         # 注意BPRLoss需要两个输入形状相同
         loss = self.loss(pos_item_score, neg_item_score)
