@@ -123,25 +123,25 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             with torch.no_grad():
                 train_metric.add(loss.item(), 1)
                 train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
 
                 # 每遍历完训练集的10%或最后一个，在验证集上计算下loss
-                if (i % (len(train_dataloader) // 10)) == 0 or i == len(train_dataloader) - 1:
+                if (i > 0 and i % (len(train_dataloader) // 10) == 0) or i == (len(train_dataloader) - 1):
                     valid_metric = d2l.Accumulator(2)
                     model.eval()
-                    valid_loop = tqdm(valid_dataloader, leave=False, ncols=80, total=len(valid_dataloader))
-                    for val_interaction in valid_loop:
-                        loss = model.calculate_loss(val_interaction)
-                        valid_metric.add(loss.item(), 1)
-                        valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
+                    for val_interaction in valid_dataloader:
+                        cur_loss = model.calculate_loss(val_interaction)
+                        valid_metric.add(cur_loss.item(), 1)
+                        train_loop.set_postfix_str(f'valid loss: {cur_loss.item():.4f}')
                     valid_loss = valid_metric[0] / valid_metric[1]
-                    print(f"avg. valid loss: {valid_loss:.4f}")
                     if valid_loss < min_loss:  # 有更小的valid_loss了，保存一下checkpoint
                         model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
                         torch.save(model.state_dict(), os.path.join(path2save, model_name))
                     model.train()  # 退出时恢复下train模式
+
         print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
 
     if args.test:

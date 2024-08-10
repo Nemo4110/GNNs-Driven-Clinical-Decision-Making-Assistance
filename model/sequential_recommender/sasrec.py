@@ -11,11 +11,11 @@ class SASRec(SequentialRecommender):
 
         # load parameters
         self.LABEL_FIELD = config.get("LABEL_FIELD", "label")
-        self.n_layers = config.get("n_layers", 1)
+        self.n_layers = config.get("n_layers", 2)
         self.n_heads = config.get("n_heads", 2)
         self.hidden_size = self.embedding_size = config["embedding_size"]
-        self.hidden_dropout_prob = config.get("hidden_dropout_prob", 0.1)
-        self.attn_dropout_prob = config.get("attn_dropout_prob", 0.1)
+        self.hidden_dropout_prob = config.get("hidden_dropout_prob", 0.5)
+        self.attn_dropout_prob = config.get("attn_dropout_prob", 0.5)
         self.layer_norm_eps = config.get("layer_norm_eps", 1e-5)
 
         # define layers and loss
@@ -93,7 +93,8 @@ class SASRec(SequentialRecommender):
         input_emb = self.LayerNorm(input_emb)
         input_emb = self.dropout(input_emb)
 
-        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values).to(self.device)
+        item_seq_len = torch.from_numpy(interaction[self.ITEM_SEQ_LEN].values)
+        item_seq_len = torch.clamp(item_seq_len, max=self.max_seq_length).to(self.device)
 
         padding_mask = self.mask_mat.repeat(B, 1)
         padding_mask = padding_mask >= item_seq_len.unsqueeze(1)  # padding mask
