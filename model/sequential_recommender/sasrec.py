@@ -53,6 +53,7 @@ class SASRec(SequentialRecommender):
         self.hst_ie_fc = nn.Linear(num_item_feature * self.embedding_size, self.hidden_size)
         self.tgt_ie_fc = nn.Linear(num_item_feature * self.embedding_size, self.hidden_size)
 
+        self.sigmoid = nn.Sigmoid()
         # 与原论文保持一致，使用二分类CE
         self.loss_fct = nn.BCEWithLogitsLoss()
 
