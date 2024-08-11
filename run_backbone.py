@@ -1,6 +1,5 @@
 import argparse
 import os
-import pickle
 import pandas as pd
 import torch
 import utils.constant as constant
@@ -11,8 +10,7 @@ from tqdm import tqdm
 
 from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
-from utils.best_thresholds import BestThresholdLoggerV2
-from utils.misc import get_latest_model_ckpt, get_latest_threshold
+from utils.misc import get_latest_model_ckpt
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import convert2df
 
@@ -22,10 +20,11 @@ if __name__ == '__main__':
 
     # following arguments are model settings
     parser.add_argument("--gnn_type",                                 default="GENConv")
-    parser.add_argument("--gnn_layer_num",                type=int,   default=2)
-    parser.add_argument("--num_encoder_layers",           type=int,   default=6)
-    parser.add_argument("--hidden_dim",                   type=int,   default=512)
-    parser.add_argument("--lr",                           type=float, default=0.0003)
+    parser.add_argument("--gnn_layer_num",                type=int,   default=3)
+    parser.add_argument("--num_encoder_layers",           type=int,   default=3)
+    parser.add_argument("--hidden_dim",                   type=int,   default=256)
+    parser.add_argument("--embedding_size",               type=int,   default=10)
+    parser.add_argument("--lr",                           type=float, default=0.001)
     parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="whether to only use GNN")
     # TODO: 增加只使用GNN的模型（消融）
 
@@ -38,7 +37,6 @@ if __name__ == '__main__':
     # Experiment settings
     parser.add_argument("--item_type",                              default="MIX")
     parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
-    parser.add_argument("--epochs",                       type=int, default=3)
     parser.add_argument("--train",            action="store_true",  default=False)
     parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
@@ -55,50 +53,50 @@ if __name__ == '__main__':
     else:
         node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.item_type)
     gnn_conf = GNNConfig(args.gnn_type, args.gnn_layer_num, node_types, edge_types)
-    model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device, args.num_encoder_layers).to(device)
+    model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device, args.num_encoder_layers, args.embedding_size).to(device)
+    os.makedirs(args.path_dir_model_hub, exist_ok=True)
 
     if args.train:
         train_dataset = OneAdmOneHG(sources_dfs, "train")
         valid_dataset = OneAdmOneHG(sources_dfs, "val")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-        for epoch in range(args.epochs):
-            if args.use_gpu:
-                torch.cuda.empty_cache()
-            train_metric = d2l.Accumulator(2)  # train loss, iter num
-            model.train()
-            train_loop = tqdm(train_dataset, leave=False, ncols=80, total=len(train_dataset))
-            for hg in train_loop:
-                hg = hg.to(device)
-                logits, labels = model(hg)
-                loss = BackBoneV2.get_loss(logits, labels)
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-                with torch.no_grad():
-                    train_metric.add(loss.detach().item(), 1)
-                    train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
-            print(f"epoch #{epoch:02}, train loss: {train_metric[0] / train_metric[1]:.4f}")
+        min_loss = float("inf")
+        if args.use_gpu:
+            torch.cuda.empty_cache()
+        train_metric = d2l.Accumulator(2)  # train loss, iter num
+        model.train()
+        train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=80, total=len(train_dataset))
+        for i, hg in train_loop:
+            hg = hg.to(device)
+            logits, labels = model(hg)
+            loss = BackBoneV2.get_loss(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
 
-            if args.use_gpu:
-                torch.cuda.empty_cache()
-            valid_metric = d2l.Accumulator(2)
-            model.eval()
             with torch.no_grad():
-                valid_loop = tqdm(valid_dataset, leave=False, ncols=80, total=len(valid_dataset))
-                for hg in valid_loop:
-                    hg = hg.to(device)
-                    logits, labels = model(hg)
-                    loss = BackBoneV2.get_loss(logits, labels)
-                    valid_metric.add(loss.item(), 1)
-                    valid_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
-                valid_loss = valid_metric[0] / valid_metric[1]
-                print(f"epoch #{epoch:02}, valid loss: {valid_loss:.4f}")
+                train_metric.add(loss.detach().item(), 1)
+                train_loop.set_postfix_str(f'train loss: {loss.item():.4f}')
 
-        # save trained model (loss if valid loss)
-        os.makedirs(args.path_dir_model_hub, exist_ok=True)
-        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
-        torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
+                # 每遍历完训练集的10%或最后一个，在验证集上计算下loss
+                if (i > 0 and i % (len(train_dataset) // 10) == 0) or i == (len(train_dataset) - 1):
+                    model.eval()
+                    valid_metric = d2l.Accumulator(2)
+                    for hg in valid_dataset:
+                        hg = hg.to(device)
+                        logits, labels = model(hg)
+                        validloss = BackBoneV2.get_loss(logits, labels)
+                        valid_metric.add(validloss.item(), 1)
+                        train_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
+                    valid_loss = valid_metric[0] / valid_metric[1]
+                    if valid_loss < min_loss:
+                        min_loss = valid_loss
+                        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
+                        torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
+                    model.train()
+
+        print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
 
     if args.test:
         test_dataset = OneAdmOneHG(sources_dfs, "test")
@@ -117,7 +115,6 @@ if __name__ == '__main__':
         else:
             ckpt_filename = model_name
 
-        # TODO：用0.5作为固定阈值试试看（模型输出的scores/logits在预测时都会过sigmoid）
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []

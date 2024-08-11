@@ -43,8 +43,8 @@ def prepare_corr_config(model_c, args) -> Dict:
     config = {
         "device": torch.device('cuda') if args.use_gpu else torch.device('cpu'),
 
-        "embedding_size": args.hidden_dim,
-        "mlp_hidden_size": [args.hidden_dim, args.hidden_dim * 2, args.hidden_dim],
+        "embedding_size": args.embedding_size,
+        "mlp_hidden_size": [256, 256, 256],
         "dropout_prob": args.dropout_prob,
 
         "LABEL_FIELD": "label",
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument("--train", action="store_true", default=False)
     parser.add_argument("--test", action="store_true", default=False)
 
-    parser.add_argument("--hidden_dim", type=int, default=64)
+    parser.add_argument("--embedding_size", type=int, default=10)
     parser.add_argument("--dropout_prob", type=float, default=0.1)
     parser.add_argument("--max_seq_length", type=int, default=50)
 
@@ -138,6 +138,7 @@ if __name__ == '__main__':
                         train_loop.set_postfix_str(f'valid loss: {cur_loss.item():.4f}')
                     valid_loss = valid_metric[0] / valid_metric[1]
                     if valid_loss < min_loss:  # 有更小的valid_loss了，保存一下checkpoint
+                        min_loss = valid_loss
                         model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
                         torch.save(model.state_dict(), os.path.join(path2save, model_name))
                     model.train()  # 退出时恢复下train模式

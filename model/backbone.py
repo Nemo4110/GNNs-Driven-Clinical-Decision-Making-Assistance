@@ -24,13 +24,15 @@ class BackBoneV2(nn.Module):
                  h_dim: int,
                  gnn_conf: GNNConfig,
                  device,
-                 num_enc_layers: int = 6):
+                 num_enc_layers: int = 6,
+                 embedding_size: int = 10):
         super().__init__()
         self.source_dfs = source_dfs  # 提供有用的信息
         assert goal in ["drug", "labitem"]
         self.goal = goal
 
         self.h_dim = h_dim
+        self.embedding_size = embedding_size
         self.gnn_conf = gnn_conf  # 可以用来控制纳入考虑的边类型
         self.device = device
 
@@ -42,15 +44,15 @@ class BackBoneV2(nn.Module):
             for node_type in self.node_types if node_type != "admission"
         }
         self.item_id_embedding = nn.ModuleDict({
-            node_type: nn.Embedding(self.item_vocab_size[node_type], self.h_dim)
+            node_type: nn.Embedding(self.item_vocab_size[node_type], self.embedding_size)
             for node_type in self.node_types if node_type != "admission"
         })
         self.node_features_embedding = nn.ModuleDict({
-            node_type: GraphEmbeddingLayer(self.h_dim, *self._get_node_feat_dims(node_type))
+            node_type: GraphEmbeddingLayer(self.embedding_size, *self._get_node_feat_dims(node_type))
             for node_type in self.node_types
         })
         self.edge_features_embedding = nn.ModuleDict({
-            "_".join(edge_type): GraphEmbeddingLayer(self.h_dim, *self._get_edge_feat_dims(edge_type))
+            "_".join(edge_type): GraphEmbeddingLayer(self.embedding_size, *self._get_edge_feat_dims(edge_type))
             for edge_type in self.edge_types if "rev" not in edge_type[1]
         })
 
@@ -187,7 +189,7 @@ class BackBoneV2(nn.Module):
             pre_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]  # 前一天的物品emb
             cur_day_seq_to_be_judged, cur_day_01_labels = self._get_cur_day_seq_to_be_judged_and_labels(cur_day_hg)
             cur_day_seq_to_be_judged_emb = pre_day_item_feats_enc[cur_day_seq_to_be_judged]  # 取出相应行
-            cur_day_logits = self.lp(pre_day_patient_conditions, cur_day_seq_to_be_judged_emb).squeeze(0)
+            cur_day_logits = self.lp(pre_day_patient_conditions, cur_day_seq_to_be_judged_emb)
             logits.append(cur_day_logits)
             labels.append(cur_day_01_labels)
 
@@ -236,7 +238,7 @@ if __name__ == '__main__':
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)
 
-    model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3)
+    model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
     for epoch in range(10):
