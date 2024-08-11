@@ -44,7 +44,8 @@ def prepare_corr_config(model_c, args) -> Dict:
         "device": torch.device('cuda') if args.use_gpu else torch.device('cpu'),
 
         "embedding_size": args.embedding_size,
-        "mlp_hidden_size": [256, 256, 256],
+        "hidden_size": args.hidden_size,
+        "mlp_hidden_size": [args.hidden_size, args.hidden_size, args.hidden_size],
         "dropout_prob": args.dropout_prob,
 
         "LABEL_FIELD": "label",
@@ -75,6 +76,7 @@ if __name__ == '__main__':
     parser.add_argument("--test", action="store_true", default=False)
 
     parser.add_argument("--embedding_size", type=int, default=10)
+    parser.add_argument("--hidden_size", type=int, default=256)
     parser.add_argument("--dropout_prob", type=float, default=0.1)
     parser.add_argument("--max_seq_length", type=int, default=50)
 

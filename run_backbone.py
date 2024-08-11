@@ -88,10 +88,10 @@ if __name__ == '__main__':
                         logits, labels = model(hg)
                         validloss = BackBoneV2.get_loss(logits, labels)
                         valid_metric.add(validloss.item(), 1)
-                        train_loop.set_postfix_str(f'valid loss: {loss.item():.4f}')
+                        train_loop.set_postfix_str(f'valid loss: {validloss.item():.4f}')
                     valid_loss = valid_metric[0] / valid_metric[1]
-                    if valid_loss < min_loss:
-                        min_loss = valid_loss
+                    if valid_loss < min_loss or i == (len(train_dataset) - 1):  # 有更小的valid_loss或到最后了
+                        min_loss = min(min_loss, valid_loss)
                         model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
                         torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
                     model.train()

@@ -13,7 +13,8 @@ class SASRec(SequentialRecommender):
         self.LABEL_FIELD = config.get("LABEL_FIELD", "label")
         self.n_layers = config.get("n_layers", 2)
         self.n_heads = config.get("n_heads", 2)
-        self.hidden_size = self.embedding_size = config["embedding_size"]
+        self.embedding_size = config["embedding_size"]
+        self.hidden_size = config["hidden_size"]
         self.hidden_dropout_prob = config.get("hidden_dropout_prob", 0.5)
         self.attn_dropout_prob = config.get("attn_dropout_prob", 0.5)
         self.layer_norm_eps = config.get("layer_norm_eps", 1e-5)

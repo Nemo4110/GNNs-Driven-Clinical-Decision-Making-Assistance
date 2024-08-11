@@ -39,6 +39,7 @@ class GeneralRecommender(AbstractRecommender):
         self.ITEM_ID = config.get("ITEM_ID_FIELD", "item_id")  # 记录物品id的列名
 
         self.embedding_size = config["embedding_size"]
+        self.hidden_size = config["hidden_size"]
         self.embedding_layer = GeneralEmbeddingLayer(config, dataset)
 
         self.device = config["device"]
@@ -51,8 +52,8 @@ class GeneralRecommender(AbstractRecommender):
             else len(self.embedding_layer.item_token_field_names)
 
         # 用于对齐维度
-        self.uf_aligner = nn.Linear(self.num_user_feature * self.embedding_size, self.embedding_size)
-        self.if_aligner = nn.Linear(self.num_item_feature * self.embedding_size, self.embedding_size)
+        self.uf_aligner = nn.Linear(self.num_user_feature * self.embedding_size, self.hidden_size)
+        self.if_aligner = nn.Linear(self.num_item_feature * self.embedding_size, self.hidden_size)
 
 
 class SequentialRecommender(AbstractRecommender):

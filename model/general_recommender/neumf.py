@@ -14,12 +14,13 @@ class NeuMF(GeneralRecommender):
         self.LABEL = config["LABEL_FIELD"]
 
         # load parameters info
+        self.hidden_size = config["hidden_size"]
         self.mlp_hidden_size = config["mlp_hidden_size"]
         self.dropout_prob = config["dropout_prob"]
 
         # define layers and loss
-        self.mlp_layers = MLPLayers([2 * self.embedding_size] + self.mlp_hidden_size, self.dropout_prob)
-        self.predict_layer = nn.Linear(self.embedding_size + self.mlp_hidden_size[-1], 1)
+        self.mlp_layers = MLPLayers([2 * self.hidden_size] + self.mlp_hidden_size, self.dropout_prob)
+        self.predict_layer = nn.Linear(self.hidden_size + self.mlp_hidden_size[-1], 1)
 
         self.sigmoid = nn.Sigmoid()
         self.loss = nn.BCEWithLogitsLoss()
@@ -39,7 +40,7 @@ class NeuMF(GeneralRecommender):
         user_mlp_e = self.uf_aligner(user_e.flatten(start_dim=1))
         item_mlp_e = self.if_aligner(item_e.flatten(start_dim=1))
 
-        mf_output = torch.mul(user_mf_e, item_mf_e)  # [batch_size, embedding_size]
+        mf_output = torch.mul(user_mf_e, item_mf_e)  # [batch_size, hidden_size]
         mlp_output = self.mlp_layers(torch.cat((user_mlp_e, item_mlp_e), -1))  # [batch_size, layers[-1]]
 
         output = self.predict_layer(torch.cat((mf_output, mlp_output), -1))
