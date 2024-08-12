@@ -25,18 +25,15 @@ if __name__ == '__main__':
     parser.add_argument("--hidden_dim",                   type=int,   default=256)
     parser.add_argument("--embedding_size",               type=int,   default=10)
     parser.add_argument("--lr",                           type=float, default=0.001)
-    parser.add_argument("--is_gnn_only",      action="store_true",    default=False,                help="whether to only use GNN")
-    # TODO: 增加只使用GNN的模型（消融）
 
-    # Paths
     parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_ETL_OUTPUT, help="path where dataset directory locates")  # in linux
     parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                     help="path where models save")
     parser.add_argument("--path_dir_results",   default=r"./results",                       help="path where results save")
-    parser.add_argument("--path_dir_thresholds",default=r"./thresholds",                    help="path where thresholds save")
 
     # Experiment settings
     parser.add_argument("--item_type",                              default="MIX")
     parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
+    parser.add_argument("--is_gnn_only",      action="store_true",  default=False,      help="whether to only use GNN")
     parser.add_argument("--train",            action="store_true",  default=False)
     parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
@@ -53,7 +50,8 @@ if __name__ == '__main__':
     else:
         node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.item_type)
     gnn_conf = GNNConfig(args.gnn_type, args.gnn_layer_num, node_types, edge_types)
-    model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device, args.num_encoder_layers, args.embedding_size).to(device)
+    model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device,
+                       args.num_encoder_layers, args.embedding_size, args.is_gnn_only).to(device)
     os.makedirs(args.path_dir_model_hub, exist_ok=True)
 
     if args.train:
