@@ -238,7 +238,8 @@ if __name__ == '__main__':
     dataset = OneAdmOneHG(sources_dfs, "val")
 
     hidden_dim, device = 256, torch.device('cpu')
-    node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    # node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)
 
     model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10, True)
