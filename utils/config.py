@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List, Tuple, Dict
 
 
 @dataclass
@@ -44,6 +45,20 @@ class HeteroGraphConfig:
             raise NotImplementedError
 
         return node_types, edge_types
+
+
+max_seq_length = 150
+max_adm_length = 50
+neg_sample_strategy = 2  # 默认使用2：1负采样策略
+
+
+@dataclass
+class GNNConfig:
+    gnn_type: str
+    gnn_layer_num: int
+    node_types: List[str]
+    edge_types: List[Tuple[str, str, str]]
+    mapper = MappingManager()
 
 
 if __name__ == "__main__":
