@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
-from utils.misc import get_latest_model_ckpt
+from utils.misc import get_latest_model_ckpt, EarlyStopper
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import convert2df
 
@@ -35,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
     parser.add_argument("--is_gnn_only",      action="store_true",  default=False,      help="whether to only use GNN")
     parser.add_argument("--train",            action="store_true",  default=False)
+    parser.add_argument("--patience",         type=int,             default=3)
     parser.add_argument("--test",             action="store_true",  default=False)
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
     parser.add_argument("--model_ckpt",                             default=None,      help="the .pt filename where stores the state_dict of model")
@@ -59,6 +60,7 @@ if __name__ == '__main__':
         valid_dataset = OneAdmOneHG(sources_dfs, "val")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         min_loss = float("inf")
+        early_stopper = EarlyStopper(args.patience, False)
         if args.use_gpu:
             torch.cuda.empty_cache()
         train_metric = d2l.Accumulator(2)  # train loss, iter num
@@ -87,11 +89,18 @@ if __name__ == '__main__':
                         validloss = BackBoneV2.get_loss(logits, labels)
                         valid_metric.add(validloss.item(), 1)
                         train_loop.set_postfix_str(f'valid loss: {validloss.item():.4f}')
+
                     valid_loss = valid_metric[0] / valid_metric[1]
-                    if valid_loss < min_loss or i == (len(train_dataset) - 1):  # 有更小的valid_loss或到最后了
-                        min_loss = min(min_loss, valid_loss)
-                        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
-                        torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
+                    early_stopper(valid_loss)
+                    # 在没有早停的前提下
+                    if not early_stopper.early_stop:
+                        # 有更小的valid_loss，或到最后了且valid_loss更小了
+                        if valid_loss < min_loss or (i == (len(train_dataset) - 1) and valid_loss < min_loss):
+                            min_loss = min(min_loss, valid_loss)
+                            model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
+                            torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
+                    else:
+                        break  # 早停
                     model.train()
 
         print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
