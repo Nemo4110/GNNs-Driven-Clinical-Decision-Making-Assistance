@@ -100,6 +100,7 @@ if __name__ == '__main__':
                             model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
                             torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
                     else:
+                        print("Early stop due to increasing valid loss!")
                         break  # 早停
                     model.train()
 
