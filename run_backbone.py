@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
-from utils.misc import get_latest_model_ckpt
+from utils.misc import get_latest_model_ckpt, EarlyStopper
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import convert2df, save_results
 
@@ -35,8 +35,9 @@ if __name__ == '__main__':
     parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
     parser.add_argument("--is_gnn_only",      action="store_true",  default=False,      help="whether to only use GNN")
     parser.add_argument("--train",            action="store_true",  default=False)
+    parser.add_argument("--patience",         type=int,             default=3)
     parser.add_argument("--test",             action="store_true",  default=False)
-    parser.add_argument("--notes", default=None)
+    parser.add_argument("--notes",                                  default=None,      help="experiment description and running args")
     parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
     parser.add_argument("--model_ckpt",                             default=None,      help="the .pt filename where stores the state_dict of model")
     parser.add_argument("--use_gpu",          action="store_true",  default=False)
@@ -62,6 +63,7 @@ if __name__ == '__main__':
         valid_dataset = OneAdmOneHG(sources_dfs, "val")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         min_loss = float("inf")
+        early_stopper = EarlyStopper(args.patience, False)
         if args.use_gpu:
             torch.cuda.empty_cache()
         train_metric = d2l.Accumulator(2)  # train loss, iter num
@@ -90,12 +92,14 @@ if __name__ == '__main__':
                         validloss = BackBoneV2.get_loss(logits, labels)
                         valid_metric.add(validloss.item(), 1)
                         train_loop.set_postfix_str(f'valid loss: {validloss.item():.4f}')
-                    valid_loss = valid_metric[0] / valid_metric[1]
-                    if valid_loss < min_loss or i == (len(train_dataset) - 1):  # 有更小的valid_loss或到最后了
-                        min_loss = min(min_loss, valid_loss)
-                        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
-                        torch.save(model.state_dict(), os.path.join(args.path_dir_model_hub, model_name))
-                    model.train()
+                    valid_loss = valid_metric[0] / valid_metric[1]  # 计算验证集上的平均loss
+                    model.train()  # 验证完了，返回训练模式
+
+                    early_stopper(valid_loss, model)
+                    if early_stopper.is_stop or i == (len(train_dataset) - 1):  # 早停了或到训练集遍历到最后了
+                        model_name = f"loss_{early_stopper.best_score:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
+                        early_stopper.save_checkpoint(args.path_dir_model_hub, model_name, args.notes)  # 保存valid_loss最低的模型参数检查点
+                        break
 
         print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
 
