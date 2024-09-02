@@ -14,7 +14,8 @@ from dataset.unified import (SourceDataFrames,
                              SingleItemTypeForContextAwareRec,
                              SingleItemTypeForSequentialRec,
                              DFDataset)
-from utils.misc import get_latest_model_ckpt
+from utils.misc import get_latest_model_ckpt, EarlyStopper
+from utils.metrics import save_results
 
 
 def get_model_and_dataset_class(model_name):
@@ -74,6 +75,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--train", action="store_true", default=False)
     parser.add_argument("--test", action="store_true", default=False)
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--notes", default=None, help="experiment description and running args")
 
     parser.add_argument("--embedding_size", type=int, default=10)
     parser.add_argument("--hidden_size", type=int, default=256)
@@ -112,12 +115,14 @@ if __name__ == '__main__':
             shuffle=False, pin_memory=True, collate_fn=DFDataset.collect_fn)
 
         model = model_class(config, train_pre_dataset).to(device)
+
         path2save = os.path.join(args.path_dir_model_hub, model_class.__bases__[0].__name__, model_class.__name__)
         os.makedirs(path2save, exist_ok=True)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-        min_loss = float("inf")
 
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+        early_stopper = EarlyStopper(args.patience, False)
         train_metric = d2l.Accumulator(2)  # train loss, batch number counter
+
         model.train()
         train_loop = tqdm(enumerate(train_dataloader), leave=False, ncols=80, total=len(train_dataloader))
         for i, interaction in train_loop:
@@ -139,11 +144,13 @@ if __name__ == '__main__':
                         valid_metric.add(cur_loss.item(), 1)
                         train_loop.set_postfix_str(f'valid loss: {cur_loss.item():.4f}')
                     valid_loss = valid_metric[0] / valid_metric[1]
-                    if valid_loss < min_loss:  # 有更小的valid_loss了，保存一下checkpoint
-                        min_loss = valid_loss
-                        model_name = f"loss_{valid_loss:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
-                        torch.save(model.state_dict(), os.path.join(path2save, model_name))
                     model.train()  # 退出时恢复下train模式
+
+                    early_stopper(valid_loss, model)
+                    if early_stopper.is_stop or i == (len(train_dataloader) - 1):  # 有更小的valid_loss了，保存一下checkpoint
+                        model_name = f"loss_{early_stopper.best_score:.4f}_{model.__class__.__name__}_goal_{args.goal}.pt"
+                        early_stopper.save_checkpoint(path2save, model_name, args.notes)
+                        break
 
         print(f"avg. train loss: {train_metric[0] / train_metric[1]:.4f}")
 
@@ -178,4 +185,4 @@ if __name__ == '__main__':
                 collector.append(interaction)
 
         results: pd.DataFrame = pd.concat(collector, axis=0)
-        results.to_csv(os.path.join(args.path_dir_results, f"{ckpt_filename}.csv.gz"), compression='gzip')
+        save_results(args.path_dir_results, results, ckpt_filename, args.notes)

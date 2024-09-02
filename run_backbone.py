@@ -62,7 +62,6 @@ if __name__ == '__main__':
         train_dataset = OneAdmOneHG(sources_dfs, "train")
         valid_dataset = OneAdmOneHG(sources_dfs, "val")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-        min_loss = float("inf")
         early_stopper = EarlyStopper(args.patience, False)
         if args.use_gpu:
             torch.cuda.empty_cache()
