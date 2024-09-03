@@ -149,7 +149,7 @@ def save_results(path_dir_results, results, ckpt_filename, notes):
     }
     result_file = os.path.join(path_dir_results, "results.csv")
     if os.path.exists(result_file):
-        df_results = pd.read_csv(result_file, index_col=0)
+        df_results = pd.read_csv(result_file)
         df_results = pd.concat([df_results, pd.DataFrame(new_row, index=[0])], ignore_index=True)
     else:
         df_results = pd.DataFrame(new_row, index=[0])

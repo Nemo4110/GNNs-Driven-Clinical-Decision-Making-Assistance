@@ -100,7 +100,7 @@ class EarlyStopper:
         }
         log_file = os.path.join(path_to_save, "log.csv")
         if os.path.exists(log_file):
-            df = pd.read_csv(log_file, index_col=0)
+            df = pd.read_csv(log_file)
             df = pd.concat([df, pd.DataFrame(new_row, index=[0])], ignore_index=True)
         else:
             df = pd.DataFrame(new_row, index=[0])
