@@ -76,7 +76,7 @@ class BackBoneV2(nn.Module):
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
 
         # Final links predictor
-        self.lp = LinksPredictor(self.h_dim)
+        self.lp = LinksPredictor(self.h_dim, "mul")
 
         # parameters initialization
         self.apply(self._init_weights)
@@ -237,7 +237,7 @@ if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
     dataset = OneAdmOneHG(sources_dfs, "val")
 
-    hidden_dim, device = 256, torch.device('cpu')
+    hidden_dim, device = 64, torch.device('cpu')
     # node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)

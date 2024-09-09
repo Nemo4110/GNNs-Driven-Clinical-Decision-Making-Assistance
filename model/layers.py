@@ -71,19 +71,25 @@ class SingelGnn(nn.Module):
 
 
 class LinksPredictor(nn.Module):
-    def __init__(self, hidden_dim=128):
+    def __init__(self, hidden_dim=128, score_func="linear"):
         super().__init__()
         self.re_weight_a = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.re_weight_b = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-        self.pred_head = nn.Linear(hidden_dim*2, 1)
+
+        self.score_func = score_func
+        if self.score_func == "linear":
+            self.fc = nn.Linear(hidden_dim*2, 1)
 
     def forward(self, cur_day_patient_condition, item_features_selected):
         a = self.re_weight_a(cur_day_patient_condition)
         b = self.re_weight_b(item_features_selected)
 
         a = a.repeat(b.size(0), 1)
-        scores = self.pred_head(torch.cat([a, b], dim=-1))
-        return scores.squeeze(1)
+        if self.score_func == "linear":
+            scores = self.fc(torch.cat([a, b], dim=-1))
+            return scores.squeeze(1)
+        else:
+            return torch.mul(a, b).sum(-1)
 
 
 def get_decoder_by_choice(choice: str, hidden_dim: int, num_layers: int = 1):
