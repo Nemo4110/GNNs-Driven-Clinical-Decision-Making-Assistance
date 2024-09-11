@@ -14,7 +14,7 @@ from dataset.unified import (SourceDataFrames,
                              list_selected_prescriptions_columns)
 from utils.config import HeteroGraphConfig, MappingManager, GNNConfig, max_adm_length
 from utils.enum_type import FeatureType
-from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer
+from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer, AdditiveAttention
 
 
 class BackBoneV2(nn.Module):
@@ -69,8 +69,7 @@ class BackBoneV2(nn.Module):
         })
 
         if not self.is_gnn_only:
-            encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=8, batch_first=True)
-            self.patient_condition_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_enc_layers)
+            self.attention = AdditiveAttention(num_hiddens=self.h_dim, dropout=0.1)
 
         self.gnn = SingelGnn(self.h_dim, self.gnn_conf.gnn_type, self.gnn_conf.gnn_layer_num)
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
@@ -180,10 +179,12 @@ class BackBoneV2(nn.Module):
             for node_type, x in node_feats_enc.items() if (node_type != "admission" and node_type in self.node_types)
         }
 
-        patient_conditions = node_feats_enc["admission"].unsqueeze(0)
+        patient_conditions = node_feats_enc["admission"].unsqueeze(0)  # batch size = 1
         if not self.is_gnn_only:
-            subsequent_mask = nn.Transformer.generate_square_subsequent_mask(patient_conditions.size(1)).to(self.device)
-            patient_conditions = self.patient_condition_encoder(patient_conditions, mask=subsequent_mask)
+            seq_length = patient_conditions.size(1)
+            valid_lens = torch.arange(1, 1+seq_length, device=patient_conditions.device).unsqueeze(0)
+            patient_conditions = self.attention(
+                queries=patient_conditions, keys=patient_conditions, values=patient_conditions, valid_lens=valid_lens)
 
         logits = []
         labels = []
@@ -237,12 +238,13 @@ if __name__ == '__main__':
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
     dataset = OneAdmOneHG(sources_dfs, "val")
 
-    hidden_dim, device = 256, torch.device('cpu')
+    hidden_dim, device = 64, torch.device('cpu')
     # node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)
 
-    model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10, True)
+    model = BackBoneV2(
+        sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
     for epoch in range(10):
