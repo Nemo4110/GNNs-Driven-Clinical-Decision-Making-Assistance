@@ -81,7 +81,6 @@ class LinksPredictor(nn.Module):
         a = self.re_weight_a(cur_day_patient_condition)
         b = self.re_weight_b(item_features_selected)
 
-        a = a.repeat(b.size(0), 1)
         scores = self.pred_head(torch.cat([a, b], dim=-1))
         return scores.squeeze(1)
 
