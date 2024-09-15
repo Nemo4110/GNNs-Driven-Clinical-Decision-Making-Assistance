@@ -14,7 +14,7 @@ from dataset.unified import (SourceDataFrames,
                              list_selected_prescriptions_columns)
 from utils.config import HeteroGraphConfig, MappingManager, GNNConfig, max_adm_length
 from utils.enum_type import FeatureType
-from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer
+from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer, AdditiveAttention
 
 
 class BackBoneV2(nn.Module):
@@ -69,8 +69,7 @@ class BackBoneV2(nn.Module):
         })
 
         if not self.is_gnn_only:
-            encoder_layer = nn.TransformerEncoderLayer(d_model=self.h_dim, nhead=8, batch_first=True)
-            self.patient_condition_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_enc_layers)
+            self.attention = AdditiveAttention(num_hiddens=self.h_dim, dropout=0.1)
 
         self.gnn = SingelGnn(self.h_dim, self.gnn_conf.gnn_type, self.gnn_conf.gnn_layer_num)
         self.gnn = to_hetero(self.gnn, metadata=(self.gnn_conf.node_types, self.gnn_conf.edge_types))
@@ -180,19 +179,42 @@ class BackBoneV2(nn.Module):
             for node_type, x in node_feats_enc.items() if (node_type != "admission" and node_type in self.node_types)
         }
 
-        patient_conditions = node_feats_enc["admission"].unsqueeze(0)
-        if not self.is_gnn_only:
-            subsequent_mask = nn.Transformer.generate_square_subsequent_mask(patient_conditions.size(1)).to(self.device)
-            patient_conditions = self.patient_condition_encoder(patient_conditions, mask=subsequent_mask)
+        patient_conditions = node_feats_enc["admission"].unsqueeze(0)  # batch size = 1
 
         logits = []
         labels = []
         for d, cur_day_hg in enumerate(total_hgs[1:]):  # 这里要扣除第一天，因为我们预测从第二天开始的序列
-            pre_day_patient_conditions = patient_conditions[:, d, :]  # 前一天的病情表示，由之前天attention聚合而来
+            pre_day_patient_conditions = patient_conditions[:, :d+1, :]  # 之前天的病情表示
             pre_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]  # 前一天的物品emb
+
             cur_day_seq_to_be_judged, cur_day_01_labels = self._get_cur_day_seq_to_be_judged_and_labels(cur_day_hg)
             cur_day_seq_to_be_judged_emb = pre_day_item_feats_enc[cur_day_seq_to_be_judged]  # 取出相应行
-            cur_day_logits = self.lp(pre_day_patient_conditions, cur_day_seq_to_be_judged_emb)
+
+            bsz = cur_day_seq_to_be_judged_emb.size(0)
+            cur_day_seq_to_be_judged_emb = cur_day_seq_to_be_judged_emb.view(bsz, 1, -1)
+            pre_day_patient_conditions = pre_day_patient_conditions.repeat(bsz, 1, 1)
+
+            # 注意力计算
+            # queries：当前天的目标物品（待判断的药品/检验项目）
+            # keys: 之前天的患者病情序列
+            # values: 之前天的患者病情序列
+            # 相当于用当前天的目标物品，去问“要怎样注意对之前天的病情？”
+            if not self.is_gnn_only:
+                att_patient_conditions = self.attention(
+                    queries=cur_day_seq_to_be_judged_emb,
+                    keys=pre_day_patient_conditions,
+                    values=pre_day_patient_conditions,
+                    valid_lens=None
+                )
+            else:
+                # 不用注意力的话，就直接取昨天的患者病情表示
+                att_patient_conditions = pre_day_patient_conditions[:, -1, :]
+
+            cur_day_logits = self.lp(
+                att_patient_conditions.view(bsz, -1),
+                cur_day_seq_to_be_judged_emb.view(bsz, -1)
+            )
+
             logits.append(cur_day_logits)
             labels.append(cur_day_01_labels)
 
@@ -242,7 +264,8 @@ if __name__ == '__main__':
     node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GENConv", 3, node_types, edge_types)
 
-    model = BackBoneV2(sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10, True)
+    model = BackBoneV2(
+        sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
     for epoch in range(10):
