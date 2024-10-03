@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
-from utils.misc import get_latest_model_ckpt, EarlyStopper
+from utils.misc import get_latest_model_ckpt, EarlyStopper, init_seed
 from utils.config import HeteroGraphConfig, GNNConfig
 from utils.metrics import convert2df, save_results
 
@@ -19,30 +19,34 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # following arguments are model settings
-    parser.add_argument("--gnn_type",                                 default="GENConv")
-    parser.add_argument("--gnn_layer_num",                type=int,   default=3)
-    parser.add_argument("--num_encoder_layers",           type=int,   default=3)
-    parser.add_argument("--hidden_dim",                   type=int,   default=256)
-    parser.add_argument("--embedding_size",               type=int,   default=10)
-    parser.add_argument("--lr",                           type=float, default=0.001)
+    parser.add_argument("--gnn_type", default="GENConv")
+    parser.add_argument("--gnn_layer_num", type=int, default=3)
+    parser.add_argument("--num_encoder_layers", type=int, default=3)
+    parser.add_argument("--hidden_dim", type=int, default=256)
+    parser.add_argument("--embedding_size", type=int, default=10)
+    parser.add_argument("--lr", type=float, default=0.001)
 
-    parser.add_argument("--root_path_dataset",  default=constant.PATH_MIMIC_III_ETL_OUTPUT, help="path where dataset directory locates")  # in linux
-    parser.add_argument("--path_dir_model_hub", default=r"./model/hub",                     help="path where models save")
-    parser.add_argument("--path_dir_results",   default=r"./results",                       help="path where results save")
+    parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT,
+                        help="path where dataset directory locates")  # in linux
+    parser.add_argument("--path_dir_model_hub", default=r"./model/hub", help="path where models save")
+    parser.add_argument("--path_dir_results", default=r"./results", help="path where results save")
 
     # Experiment settings
-    parser.add_argument("--item_type",                              default="MIX")
-    parser.add_argument("--goal",                                   default="drug",     help="the goal of the recommended task, in ['drug', 'labitem']")
-    parser.add_argument("--is_gnn_only",      action="store_true",  default=False,      help="whether to only use GNN")
-    parser.add_argument("--train",            action="store_true",  default=False)
-    parser.add_argument("--patience",         type=int,             default=3)
-    parser.add_argument("--test",             action="store_true",  default=False)
-    parser.add_argument("--notes",                                  default=None,      help="experiment description and running args")
-    parser.add_argument("--test_model_state_dict",                  default=None,      help="test only model's state_dict file name")  # must be specified when --train=False!
-    parser.add_argument("--model_ckpt",                             default=None,      help="the .pt filename where stores the state_dict of model")
-    parser.add_argument("--use_gpu",          action="store_true",  default=False)
+    parser.add_argument("--seed", type=int, default=3407)
+    parser.add_argument("--reproducibility", action="store_true", default=False)
+    parser.add_argument("--item_type", default="MIX")
+    parser.add_argument("--goal", default="drug", help="the goal of the recommended task, in ['drug', 'labitem']")
+    parser.add_argument("--is_gnn_only", action="store_true", default=False, help="whether to only use GNN")
+    parser.add_argument("--train", action="store_true", default=False)
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--test", action="store_true", default=False)
+    parser.add_argument("--notes", default=None, help="experiment description and running args")
+    parser.add_argument("--model_ckpt", default=None, help="the .pt filename where stores the state_dict of model")
+    parser.add_argument("--use_gpu", action="store_true", default=False)
 
     args = parser.parse_args()
+
+    init_seed(args.seed, args.reproducibility)
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
     sources_dfs = SourceDataFrames(args.root_path_dataset)

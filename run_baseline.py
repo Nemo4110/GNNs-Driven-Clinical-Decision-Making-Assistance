@@ -14,7 +14,7 @@ from dataset.unified import (SourceDataFrames,
                              SingleItemTypeForContextAwareRec,
                              SingleItemTypeForSequentialRec,
                              DFDataset)
-from utils.misc import get_latest_model_ckpt, EarlyStopper
+from utils.misc import get_latest_model_ckpt, EarlyStopper, init_seed
 from utils.metrics import save_results
 
 
@@ -73,6 +73,9 @@ if __name__ == '__main__':
     parser.add_argument("--model_name", default=None)
     parser.add_argument("--goal", default="drug", help="the recommended goal, in ['drug', 'labitem']")
 
+    parser.add_argument("--seed", type=int, default=3407)
+    parser.add_argument("--reproducibility", action="store_true", default=False)
+
     parser.add_argument("--train", action="store_true", default=False)
     parser.add_argument("--test", action="store_true", default=False)
     parser.add_argument("--patience", type=int, default=3)
@@ -94,6 +97,8 @@ if __name__ == '__main__':
     parser.add_argument("--model_ckpt", default=None)
 
     args = parser.parse_args()
+
+    init_seed(args.seed, args.reproducibility)
 
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
     sources_dfs = SourceDataFrames(args.root_path_dataset)

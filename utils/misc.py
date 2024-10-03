@@ -3,6 +3,9 @@ import os
 import glob
 import time
 import pandas as pd
+import random
+import numpy as np
+
 from typing import List, Dict, Tuple
 
 
@@ -109,3 +112,25 @@ class EarlyStopper:
     def save_checkpoint(self, path_to_save, model_name, notes):
         self._log(path_to_save, model_name, notes)
         torch.save(self.best_model_wts, os.path.join(path_to_save, model_name))
+
+
+def init_seed(seed, reproducibility=False):
+    r"""init random seed for random functions in numpy, torch, cuda and cudnn
+
+    Args:
+        seed (int): random seed
+        reproducibility (bool): Whether to require reproducibility
+            # 实际上这个设置对精度影响不大，仅仅是小数点后几位的差别。
+            # 所以如果不是对精度要求极高，其实不太建议修改，因为会使计算效率降低。
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    if reproducibility:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+    else:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
