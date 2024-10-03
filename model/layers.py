@@ -53,14 +53,20 @@ class SingelGnn(nn.Module):
         self.hidden_dim = hidden_dim
 
         if gnn_type == "GINEConv":
-            self.layers = nn.ModuleList([GINEConv(nn=nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim))
-                                         for _ in range(gnn_layer_num)])
+            self.layers = nn.ModuleList([
+                GINEConv(nn=MLPLayers([self.hidden_dim, self.hidden_dim*2, self.hidden_dim], 0.1, 'relu'))
+                for _ in range(gnn_layer_num)
+            ])
         elif gnn_type == "GENConv":
-            self.layers = nn.ModuleList([GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
-                                         for _ in range(gnn_layer_num)])
+            self.layers = nn.ModuleList([
+                GENConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, msg_norm=True)
+                for _ in range(gnn_layer_num)
+            ])
         elif gnn_type == "GATConv":
-            self.layers = nn.ModuleList([GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
-                                         for _ in range(gnn_layer_num)])
+            self.layers = nn.ModuleList([
+                GATConv(in_channels=self.hidden_dim, out_channels=self.hidden_dim, add_self_loops=False, edge_dim=self.hidden_dim)
+                for _ in range(gnn_layer_num)
+            ])
         else:
             raise f"Do not support arg:gnn_type={gnn_type} now!"
 
