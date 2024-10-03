@@ -14,7 +14,9 @@ from dataset.unified import (SourceDataFrames,
                              list_selected_prescriptions_columns)
 from utils.config import HeteroGraphConfig, MappingManager, GNNConfig, max_adm_length
 from utils.enum_type import FeatureType
+from utils.misc import init_seed
 from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer, AdditiveAttention
+from model.init import xavier_uniform_initialization, xavier_normal_initialization, kaiming_normal_initialization, kaiming_uniform_initialization
 
 
 class BackBoneV2(nn.Module):
@@ -26,7 +28,8 @@ class BackBoneV2(nn.Module):
                  device,
                  num_enc_layers: int = 6,
                  embedding_size: int = 10,
-                 is_gnn_only: bool = False):
+                 is_gnn_only: bool = False,
+                 **kwargs):
         super().__init__()
         self.source_dfs = source_dfs  # 提供有用的信息
         assert goal in ["drug", "labitem"]
@@ -60,11 +63,24 @@ class BackBoneV2(nn.Module):
 
         # 用于对齐emb完的维度
         self.node_features_aligner = nn.ModuleDict({
-            node_type: nn.LazyLinear(self.h_dim, bias=False)
+            node_type: nn.Linear(
+                self.embedding_size * (
+                        len(self.node_features_embedding[node_type].token_field_dims) +
+                        int(self.node_features_embedding[node_type].float_field_nums > 0) +
+                        int(node_type != "admission")
+                ),
+                self.h_dim
+            )
             for node_type in self.node_types
         })
         self.edge_features_aligner = nn.ModuleDict({
-            "_".join(edge_type): nn.LazyLinear(self.h_dim, bias=False)
+            "_".join(edge_type): nn.Linear(
+                self.embedding_size * (
+                        len(self.edge_features_embedding["_".join(edge_type)].token_field_dims) +
+                        int(self.edge_features_embedding["_".join(edge_type)].float_field_nums > 0)
+                ),
+                self.h_dim
+            )
             for edge_type in self.edge_types if "rev" not in edge_type[1]
         })
 
@@ -78,19 +94,20 @@ class BackBoneV2(nn.Module):
         self.lp = LinksPredictor(self.h_dim, "mul")
 
         # parameters initialization
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module):
-        """Initialize the weights"""
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=0.02)
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
+        self.apply(xavier_normal_initialization)
+        # self.apply(self._init_weights)
+    #
+    # def _init_weights(self, module):
+    #     """Initialize the weights"""
+    #     if isinstance(module, (nn.Linear, nn.Embedding)):
+    #         # Slightly different from the TF version which uses truncated_normal for initialization
+    #         # cf https://github.com/pytorch/pytorch/pull/5617
+    #         module.weight.data.normal_(mean=0.0, std=0.02)
+    #     elif isinstance(module, nn.LayerNorm):
+    #         module.bias.data.zero_()
+    #         module.weight.data.fill_(1.0)
+    #     if isinstance(module, nn.Linear) and module.bias is not None:
+    #         module.bias.data.zero_()
 
     def _get_node_feat_dims(self, node_type):
         if node_type == "admission":
@@ -256,17 +273,19 @@ class BackBoneV2(nn.Module):
 
 
 if __name__ == '__main__':
+    init_seed(10043)
+
     sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
     dataset = OneAdmOneHG(sources_dfs, "val")
 
     hidden_dim, device = 64, torch.device('cpu')
-    # node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
-    node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
+    node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
+    # node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
 
     model = BackBoneV2(
         sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
 
     for epoch in range(10):
         metric = d2l.Accumulator(2)
