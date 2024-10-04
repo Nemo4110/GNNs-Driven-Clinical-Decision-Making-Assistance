@@ -11,38 +11,23 @@ from typing import List
 
 
 class PositionalEncoding(nn.Module):
-    r"""
-        Add position encoding information for each timestep.
-    Refs:
-        - <https://jalammar.github.io/illustrated-transformer/>
-        - <https://zhuanlan.zhihu.com/p/338592312>
-        - <https://zhuanlan.zhihu.com/p/454482273>
-    """
-    def __init__(self, hidden_dim, max_timestep):
-        super().__init__()
+    """Positional encoding.
 
-        pe = torch.zeros(max_timestep, hidden_dim)
+    Defined in :numref:`sec_self-attention-and-positional-encoding`"""
+    def __init__(self, num_hiddens, dropout, max_len=1000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(dropout)
+        # Create a long enough `P`
+        self.P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(
+            -1, 1) / torch.pow(10000, torch.arange(
+            0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        self.P[:, :, 0::2] = torch.sin(X)
+        self.P[:, :, 1::2] = torch.cos(X)
 
-        position = torch.arange(0, max_timestep, dtype=torch.float).unsqueeze(1)  # [max_timestep, 1]
-
-        # *** the temperature modefied due to the experiment result of DAB-DETR ***
-        # div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
-        div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(20.0) / hidden_dim))
-
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-
-        pe = pe.unsqueeze(0).transpose(0, 1)  # [len, batch, hidden_dim]
-        pe.requires_grad = False
-
-        self.register_buffer('pe', pe)
-        # print(self.pe.shape)  # torch.Size([20, 1, 64])
-
-    def forward(self, x):
-        if self.pe.device != x.device:
-            self.pe.to(x.device)
-        # return x + self.pe[:x.size(0), :]
-        return x + self.pe  # using broadcast mechanism
+    def forward(self, X):
+        X = X + self.P[:, :X.shape[1], :].to(X.device)
+        return self.dropout(X)
 
 
 class SingelGnn(nn.Module):
@@ -882,9 +867,9 @@ class AdditiveAttention(nn.Module):  #@save
     def __init__(self, num_hiddens, dropout, **kwargs):
         super(AdditiveAttention, self).__init__(**kwargs)
         # 3个映射矩阵，将最后一维映射到相同维度
-        self.W_k = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_q = nn.LazyLinear(num_hiddens, bias=False)
-        self.w_v = nn.LazyLinear(1, bias=False)
+        self.W_k = nn.Linear(num_hiddens, num_hiddens, bias=False)
+        self.W_q = nn.Linear(num_hiddens, num_hiddens, bias=False)
+        self.w_v = nn.Linear(num_hiddens, 1, bias=False)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, queries, keys, values, valid_lens):
