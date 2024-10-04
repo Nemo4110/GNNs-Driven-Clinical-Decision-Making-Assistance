@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_encoder_layers", type=int, default=3)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--embedding_size", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr", type=float, default=0.0001)
 
     parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT,
                         help="path where dataset directory locates")  # in linux
@@ -69,6 +69,8 @@ if __name__ == '__main__':
         train_dataset = OneAdmOneHG(sources_dfs, "train")
         valid_dataset = OneAdmOneHG(sources_dfs, "val")
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer=optimizer, T_max=args.epochs*len(train_dataset), eta_min=0.001*args.lr)
         early_stopper = EarlyStopper(args.patience, False)
         for epoch in range(args.epochs):
             if args.use_gpu:
@@ -86,6 +88,7 @@ if __name__ == '__main__':
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
+                scheduler.step()
 
                 # VALID STAGE
                 with torch.no_grad():
