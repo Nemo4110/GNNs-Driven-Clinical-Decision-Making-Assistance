@@ -34,6 +34,7 @@ if __name__ == '__main__':
     # Experiment settings
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--reproducibility", action="store_true", default=False)
+    parser.add_argument("--init_method", default="xavier_normal")
     parser.add_argument("--item_type", default="MIX")
     parser.add_argument("--goal", default="drug", help="the goal of the recommended task, in ['drug', 'labitem']")
     parser.add_argument("--is_gnn_only", action="store_true", default=False, help="whether to only use GNN")
@@ -57,7 +58,8 @@ if __name__ == '__main__':
         node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.item_type)
     gnn_conf = GNNConfig(args.gnn_type, args.gnn_layer_num, node_types, edge_types)
     model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device,
-                       args.num_encoder_layers, args.embedding_size, args.is_gnn_only).to(device)
+                       args.num_encoder_layers, args.embedding_size, args.is_gnn_only,
+                       init_method=args.init_method,).to(device)
 
     os.makedirs(args.path_dir_model_hub, exist_ok=True)
     os.makedirs(args.path_dir_results, exist_ok=True)

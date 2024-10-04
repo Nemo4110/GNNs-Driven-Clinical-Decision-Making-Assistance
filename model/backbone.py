@@ -16,7 +16,7 @@ from utils.config import HeteroGraphConfig, MappingManager, GNNConfig, max_adm_l
 from utils.enum_type import FeatureType
 from utils.misc import init_seed
 from model.layers import LinksPredictor, SingelGnn, GraphEmbeddingLayer, AdditiveAttention
-from model.init import xavier_uniform_initialization, xavier_normal_initialization, kaiming_normal_initialization, kaiming_uniform_initialization
+from model.init import str2init
 
 
 class BackBoneV2(nn.Module):
@@ -29,6 +29,7 @@ class BackBoneV2(nn.Module):
                  num_enc_layers: int = 6,
                  embedding_size: int = 10,
                  is_gnn_only: bool = False,
+                 init_method: str = "xavier_normal",
                  **kwargs):
         super().__init__()
         self.source_dfs = source_dfs  # 提供有用的信息
@@ -94,20 +95,7 @@ class BackBoneV2(nn.Module):
         self.lp = LinksPredictor(self.h_dim, "mul")
 
         # parameters initialization
-        self.apply(xavier_normal_initialization)
-        # self.apply(self._init_weights)
-    #
-    # def _init_weights(self, module):
-    #     """Initialize the weights"""
-    #     if isinstance(module, (nn.Linear, nn.Embedding)):
-    #         # Slightly different from the TF version which uses truncated_normal for initialization
-    #         # cf https://github.com/pytorch/pytorch/pull/5617
-    #         module.weight.data.normal_(mean=0.0, std=0.02)
-    #     elif isinstance(module, nn.LayerNorm):
-    #         module.bias.data.zero_()
-    #         module.weight.data.fill_(1.0)
-    #     if isinstance(module, nn.Linear) and module.bias is not None:
-    #         module.bias.data.zero_()
+        self.apply(str2init[init_method])
 
     def _get_node_feat_dims(self, node_type):
         if node_type == "admission":

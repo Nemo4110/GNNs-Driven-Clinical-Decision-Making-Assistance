@@ -93,3 +93,25 @@ def normal_(
             normal_, (tensor,), tensor=tensor, mean=mean, std=std, generator=generator
         )
     return _no_grad_normal_(tensor, mean, std, generator)
+
+
+def truncated_normal_initialization(self, module):
+    """Initialize the weights, borrowed from nano-gpt"""
+    if isinstance(module, (nn.Linear, nn.Embedding)):
+        # Slightly different from the TF version which uses truncated_normal for initialization
+        # cf https://github.com/pytorch/pytorch/pull/5617
+        module.weight.data.normal_(mean=0.0, std=0.02)
+    elif isinstance(module, nn.LayerNorm):
+        module.bias.data.zero_()
+        module.weight.data.fill_(1.0)
+    if isinstance(module, nn.Linear) and module.bias is not None:
+        module.bias.data.zero_()
+
+
+str2init = {
+    "xavier_uniform": xavier_uniform_initialization,
+    "xavier_normal": xavier_normal_initialization,
+    "kaiming_uniform": kaiming_uniform_initialization,
+    "kaiming_normal": kaiming_normal_initialization,
+    "truncated_normal": truncated_normal_initialization
+}
