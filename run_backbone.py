@@ -85,14 +85,17 @@ if __name__ == '__main__':
             # TRAIN STAGE
             train_metric = d2l.Accumulator(2)  # train loss, iter num
             model.train()
-            train_loop = tqdm(enumerate(train_dataset), ncols=120, total=len(train_dataset))
+            train_loop = tqdm(enumerate(train_dataset), ncols=80, leave=False, total=len(train_dataset), ascii=True)
             for i, hg in train_loop:
                 hg = hg.to(device)
                 with torch.autocast(device_type=device.type, dtype=torch.float16):
                     logits, labels = model(hg)
                     loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
-                train_loop.set_postfix_str(f'curr loss: {loss.detach().item():.4f}, avg. train loss of epoch #{epoch:02}: {train_metric[0] / train_metric[1]:.4f}')
+
+                train_loop.set_description_str(f"Ep#{epoch:02} **train**")
+                train_loop.set_postfix_str(f'loss: {loss.detach().item():.3f}, avg.: {train_metric[0] / train_metric[1]:.3f}')
+
                 loss = loss / args.accumulation_steps
                 loss.backward()  # 累加梯度
                 if (i+1) % args.accumulation_steps == 0 or (i+1) == len(train_dataset):
@@ -106,13 +109,15 @@ if __name__ == '__main__':
                     model.eval()
                     valid_metric = d2l.Accumulator(2)
                     with torch.no_grad():
-                        valid_loop = tqdm(valid_dataset, leave=False, ncols=120, total=len(valid_dataset))
-                        for hg in valid_loop:
+                        for hg in valid_dataset:
                             hg = hg.to(device)
                             logits, labels = model(hg)
                             validloss = BackBoneV2.get_loss(logits, labels)
                             valid_metric.add(validloss.item(), 1)
-                            valid_loop.set_postfix_str(f'avg. valid loss: {valid_metric[0] / valid_metric[1]:.4f}')
+
+                            train_loop.set_description_str(f"Ep#{epoch:02} **valid**")
+                            train_loop.set_postfix_str(f'loss: {validloss.item():.3f}, avg.: {valid_metric[0] / valid_metric[1]:.3f}')
+
                     early_stopper(score=valid_metric[0] / valid_metric[1], model=model)
                     model.train()  # 验证完了，返回训练模式
                 if early_stopper.is_stop: break
@@ -142,7 +147,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for hg in tqdm(test_dataset, leave=False, ncols=120, total=len(test_dataset)):
+            for hg in tqdm(test_dataset, leave=False, ncols=80, total=len(test_dataset), ascii=True):
                 hg = hg.to(device)
                 logits, labels = model(hg)
 
