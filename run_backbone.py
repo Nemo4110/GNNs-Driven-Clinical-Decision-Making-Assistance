@@ -76,7 +76,7 @@ if __name__ == '__main__':
         valid_dataset = HGDataset(valid_pre_dataset)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer=optimizer, T_max=args.epochs*len(train_dataset), eta_min=0.001*args.lr)
+            optimizer=optimizer, T_max=args.epochs*(len(train_dataset)//args.accumulation_steps + 1), eta_min=0.001*args.lr)
         early_stopper = EarlyStopper(args.patience, False)
         for epoch in range(args.epochs):
             if args.use_gpu:
@@ -98,8 +98,8 @@ if __name__ == '__main__':
                 if (i+1) % args.accumulation_steps == 0 or (i+1) == len(train_dataset):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()  # 注意：使用梯度累计时，学习率要适当放大
+                    scheduler.step()
                     optimizer.zero_grad()
-                scheduler.step()
 
                 # VALID STAGE
                 if i > 0 and i % (len(train_dataset) // 10) == 0:  # 每遍历完训练集的10%
