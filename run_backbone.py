@@ -85,7 +85,7 @@ if __name__ == '__main__':
             # TRAIN STAGE
             train_metric = d2l.Accumulator(2)  # train loss, iter num
             model.train()
-            train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=120, total=len(train_dataset))
+            train_loop = tqdm(enumerate(train_dataset), ncols=120, total=len(train_dataset))
             for i, hg in train_loop:
                 hg = hg.to(device)
                 with torch.autocast(device_type=device.type, dtype=torch.float16):
