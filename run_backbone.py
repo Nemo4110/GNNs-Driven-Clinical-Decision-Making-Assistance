@@ -8,7 +8,7 @@ from d2l import torch as d2l
 from typing import List
 from tqdm import tqdm
 
-from dataset.unified import SourceDataFrames, OneAdmOneHG
+from dataset.unified import SourceDataFrames, OneAdmOneHG, HGDataset
 from model.backbone import BackBoneV2
 from utils.misc import get_latest_model_ckpt, EarlyStopper, init_seed
 from utils.config import HeteroGraphConfig, GNNConfig
@@ -66,8 +66,10 @@ if __name__ == '__main__':
     os.makedirs(args.path_dir_results, exist_ok=True)
 
     if args.train:
-        train_dataset = OneAdmOneHG(sources_dfs, "train")
-        valid_dataset = OneAdmOneHG(sources_dfs, "val")
+        train_pre_dataset = OneAdmOneHG(sources_dfs, "train")
+        train_dataset = HGDataset(train_pre_dataset)
+        valid_pre_dataset = OneAdmOneHG(sources_dfs, "val")
+        valid_dataset = HGDataset(valid_pre_dataset)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer=optimizer, T_max=args.epochs*len(train_dataset), eta_min=0.001*args.lr)
@@ -116,7 +118,8 @@ if __name__ == '__main__':
         early_stopper.save_checkpoint(args.path_dir_model_hub, model_name, args.notes)  # 保存valid_loss最低的模型参数检查点
 
     if args.test:
-        test_dataset = OneAdmOneHG(sources_dfs, "test")
+        test_pre_dataset = OneAdmOneHG(sources_dfs, "test")
+        test_dataset = HGDataset(test_pre_dataset)
 
         if not args.train:
             # auto load latest save model from hub
