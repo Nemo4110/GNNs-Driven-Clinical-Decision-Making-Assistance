@@ -71,8 +71,7 @@ if __name__ == '__main__':
     os.makedirs(args.path_dir_results, exist_ok=True)
 
     if args.train:
-        train_pre_dataset = OneAdmOneHG(sources_dfs, "train")
-        train_dataset = HGDataset(train_pre_dataset)
+        train_dataset = OneAdmOneHG(sources_dfs, "train")  # 因为空间占用问题（>200G），训练集不用HGDataset
         valid_pre_dataset = OneAdmOneHG(sources_dfs, "val")
         valid_dataset = HGDataset(valid_pre_dataset)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
