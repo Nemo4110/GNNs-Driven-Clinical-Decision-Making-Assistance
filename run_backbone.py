@@ -8,7 +8,7 @@ from d2l import torch as d2l
 from typing import List
 from tqdm import tqdm
 
-from dataset.unified import SourceDataFrames, OneAdmOneHG, HGDataset
+from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
 from utils.misc import get_latest_model_ckpt, EarlyStopper, init_seed
 from utils.config import HeteroGraphConfig, GNNConfig
@@ -72,12 +72,13 @@ if __name__ == '__main__':
 
     if args.train:
         train_dataset = OneAdmOneHG(sources_dfs, "train")  # 因为空间占用问题（>200G），训练集不用HGDataset
-        valid_pre_dataset = OneAdmOneHG(sources_dfs, "val")
-        valid_dataset = HGDataset(valid_pre_dataset)
+        valid_dataset = OneAdmOneHG(sources_dfs, "val")
+
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer=optimizer, T_max=args.epochs*(len(train_dataset)//args.accumulation_steps + 1), eta_min=0.001*args.lr)
         early_stopper = EarlyStopper(args.patience, False)
+
         for epoch in range(args.epochs):
             if args.use_gpu:
                 torch.cuda.empty_cache()
@@ -88,9 +89,8 @@ if __name__ == '__main__':
             train_loop = tqdm(enumerate(train_dataset), ncols=80, leave=False, total=len(train_dataset), ascii=True)
             for i, hg in train_loop:
                 hg = hg.to(device)
-                with torch.autocast(device_type=device.type, dtype=torch.float16):
-                    logits, labels = model(hg)
-                    loss = BackBoneV2.get_loss(logits, labels)
+                logits, labels = model(hg)
+                loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
 
                 train_loop.set_description_str(f"E#{epoch:02}TRN")

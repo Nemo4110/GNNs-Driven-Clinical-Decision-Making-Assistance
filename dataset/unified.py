@@ -843,34 +843,6 @@ class DFDataset(Dataset):
         return df
 
 
-class HGDataset(Dataset):
-    r"""供主模型使用的异质图 Dataset"""
-    def __init__(self, pre_dataset: OneAdmOneHG):
-        split = pre_dataset.split
-        assert split in ("train", "test", "val")
-        self.pre_dataset = pre_dataset
-        self.location = os.path.join("data", pre_dataset.__class__.__name__, split)  # 正确前提：运行于项目一级目录下的主脚本
-        os.makedirs(self.location, exist_ok=True)
-
-        pt_files = [f for f in os.listdir(self.location) if f.endswith('.pt')]
-        if len(pt_files) > 0:
-            self.hgs = [torch.load(os.path.join(self.location, pt)) for pt in pt_files]
-        else:
-            self._collect_and_save()
-
-    def _collect_and_save(self):
-        self.hgs = []
-        for idx, hg in tqdm(enumerate(self.pre_dataset), leave=False):
-            self.hgs.append(hg)
-            torch.save(hg, f'{os.path.join(self.location, str(idx))}.pt')
-
-    def __len__(self):
-        return len(self.hgs)
-
-    def __getitem__(self, idx):
-        return self.hgs[idx]
-
-
 # https://stackoverflow.com/questions/69959719
 def string2list(row_value):
     list_str = row_value.strip('][').replace('"', '').split(',')
