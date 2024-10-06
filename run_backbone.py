@@ -89,12 +89,12 @@ if __name__ == '__main__':
             train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=120, total=len(train_dataset))
             for i, hg in train_loop:
                 hg = hg.to(device)
-                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+                with torch.autocast(device_type=device.type, dtype=torch.float16):
                     logits, labels = model(hg)
                     loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
                 train_loop.set_postfix_str(f'curr loss: {loss.detach().item():.4f}, avg. train loss of epoch #{epoch:02}: {train_metric[0] / train_metric[1]:.4f}')
-                loss = loss / args.accumulation_steps  # 标准化loss
+                loss = loss / args.accumulation_steps
                 loss.backward()  # 累加梯度
                 if (i+1) % args.accumulation_steps == 0 or (i+1) == len(train_dataset):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
