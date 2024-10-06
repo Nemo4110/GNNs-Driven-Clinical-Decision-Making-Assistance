@@ -5,6 +5,7 @@ import torch
 
 from d2l import torch as d2l
 from torch_geometric.nn import to_hetero
+from tqdm import tqdm
 from dataset.unified import (SourceDataFrames,
                              OneAdmOneHG,
                              list_selected_admission_columns,
@@ -270,21 +271,23 @@ if __name__ == '__main__':
     node_types, edge_types = HeteroGraphConfig.use_all_edge_type()
     # node_types, edge_types = HeteroGraphConfig.use_one_edge_type("drug")
     gnn_conf = GNNConfig("GINEConv", 3, node_types, edge_types)
-
-    model = BackBoneV2(
-        sources_dfs, "drug", hidden_dim, gnn_conf, device, 3, 10)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
+    model = BackBoneV2(sources_dfs, "drug", hidden_dim,
+                       gnn_conf, device, 3, 10)
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    accumulation_steps = 16
 
     for epoch in range(10):
         metric = d2l.Accumulator(2)
-        for i, hg in enumerate(dataset):
+        loop = tqdm(enumerate(dataset), total=len(dataset), leave=False)
+        for i, hg in loop:
             logits, labels = model(hg)
             loss = BackBoneV2.get_loss(logits, labels)
-            optimizer.zero_grad()
+            metric.add(loss.detach().item(), 1)
+            loop.set_postfix_str(f"curr loss: {loss.detach().item():.4f}, avg. loss of epoch #{epoch:02}: {metric[0] / metric[1]:.4f}")
+            loss = loss / accumulation_steps
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            with torch.no_grad():
-                metric.add(loss.detach().item(), 1)
-                print(f"iter #{i:05}/{len(dataset):05}, loss: {loss.detach().item():.3f}", flush=True)
-        print(f"epoch #{epoch:02}, loss: {metric[0] / metric[1]:02.3f}")
+            if (i+1) % accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
