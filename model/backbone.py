@@ -281,6 +281,10 @@ if __name__ == '__main__':
         metric = d2l.Accumulator(2)
         loop = tqdm(enumerate(dataset), total=len(dataset), leave=False)
         for i, hg in loop:
+            # https://github.com/pytorch/pytorch/issues/118499
+            # with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+            #     logits, labels = model(hg)
+            #     loss = BackBoneV2.get_loss(logits, labels)
             logits, labels = model(hg)
             loss = BackBoneV2.get_loss(logits, labels)
             metric.add(loss.detach().item(), 1)

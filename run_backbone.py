@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_encoder_layers", type=int, default=3)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--embedding_size", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=0.0003)
+    parser.add_argument("--lr", type=float, default=0.001)
 
     parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT,
                         help="path where dataset directory locates")  # in linux
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--reproducibility", action="store_true", default=False)
     parser.add_argument("--init_method", default="xavier_normal")
-    parser.add_argument("--use_gpu", action="store_true", default=False)
+    parser.add_argument("--use_gpu", action="store_true", default=True)
 
     parser.add_argument("--item_type", default="MIX")
     parser.add_argument("--goal", default="drug", help="the goal of the recommended task, in ['drug', 'labitem']")
@@ -89,8 +89,9 @@ if __name__ == '__main__':
             train_loop = tqdm(enumerate(train_dataset), leave=False, ncols=120, total=len(train_dataset))
             for i, hg in train_loop:
                 hg = hg.to(device)
-                logits, labels = model(hg)
-                loss = BackBoneV2.get_loss(logits, labels)
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+                    logits, labels = model(hg)
+                    loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
                 train_loop.set_postfix_str(f'curr loss: {loss.detach().item():.4f}, avg. train loss of epoch #{epoch:02}: {train_metric[0] / train_metric[1]:.4f}')
                 loss = loss / args.accumulation_steps  # 标准化loss
