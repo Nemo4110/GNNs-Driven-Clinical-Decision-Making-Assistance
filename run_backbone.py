@@ -93,8 +93,8 @@ if __name__ == '__main__':
                     loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
 
-                train_loop.set_description_str(f"Ep#{epoch:02} train")
-                train_loop.set_postfix_str(f'loss: {loss.detach().item():.3f}, avg.: {train_metric[0] / train_metric[1]:.3f}')
+                train_loop.set_description_str(f"E#{epoch:02}TRN")
+                train_loop.set_postfix_str(f'loss:{loss.detach().item():.3f}, avg:{train_metric[0] / train_metric[1]:.3f}')
 
                 loss = loss / args.accumulation_steps
                 loss.backward()  # 累加梯度
@@ -115,8 +115,8 @@ if __name__ == '__main__':
                             validloss = BackBoneV2.get_loss(logits, labels)
                             valid_metric.add(validloss.item(), 1)
 
-                            train_loop.set_description_str(f"Ep#{epoch:02} valid")
-                            train_loop.set_postfix_str(f'loss: {validloss.item():.3f}, avg.: {valid_metric[0] / valid_metric[1]:.3f}')
+                            train_loop.set_description_str(f"E#{epoch:02}VLD")
+                            train_loop.set_postfix_str(f'loss:{validloss.item():.3f}, avg:{valid_metric[0] / valid_metric[1]:.3f}')
 
                     early_stopper(score=valid_metric[0] / valid_metric[1], model=model)
                     model.train()  # 验证完了，返回训练模式
