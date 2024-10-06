@@ -35,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--reproducibility", action="store_true", default=False)
     parser.add_argument("--init_method", default="xavier_normal")
-    parser.add_argument("--use_gpu", action="store_true", default=True)
+    parser.add_argument("--use_gpu", action="store_true", default=False)
 
     parser.add_argument("--item_type", default="MIX")
     parser.add_argument("--goal", default="drug", help="the goal of the recommended task, in ['drug', 'labitem']")
@@ -127,8 +127,7 @@ if __name__ == '__main__':
         early_stopper.save_checkpoint(args.path_dir_model_hub, model_name, args.notes)  # 保存valid_loss最低的模型参数检查点
 
     if args.test:
-        test_pre_dataset = OneAdmOneHG(sources_dfs, "test")
-        test_dataset = HGDataset(test_pre_dataset)
+        test_dataset = OneAdmOneHG(sources_dfs, "test")
 
         if not args.train:
             # auto load latest save model from hub
