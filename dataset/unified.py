@@ -201,13 +201,11 @@ class SourceDataFrames:
         self.path_etl_output = path_etl_output
 
         # 读取etl处理后的数据
-        print("> loading .csv files...")
         self.df_admissions    = pd.read_csv(os.path.join(self.path_etl_output, "ADMISSIONS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
         self.df_labitems      = pd.read_csv(os.path.join(self.path_etl_output, "D_LABITEMS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
         self.df_labevents     = pd.read_csv(os.path.join(self.path_etl_output, "LABEVENTS_PREPROCESSED.csv.gz"),     index_col=0, dtype=field2dtype)
         self.df_prescriptions = pd.read_csv(os.path.join(self.path_etl_output, "PRESCRIPTIONS_PREPROCESSED.csv.gz"), index_col=0, dtype=field2dtype)
         self.df_drug_ndc_feat = pd.read_csv(os.path.join(self.path_etl_output, "DRUGS_NDC_FEAT.csv.gz"),             index_col=0, dtype=field2dtype)
-        print("> finish loading!")
 
         # 截断一下最大值最小值
         self.df_labevents['VALUENUM_Z-SCORED'] = self.df_labevents['VALUENUM_Z-SCORED'].clip(lower=-100., upper=100.)
@@ -265,7 +263,7 @@ class SourceDataFrames:
 
         both = list(set.intersection(adm_l, adm_p))
         both = list(map(int, both))
-        print(f"> total adm whose length > 1: {len(both)}")
+        # print(f"> total adm whose length > 1: {len(both)}")
 
         return both
 
@@ -802,13 +800,11 @@ class DFDataset(Dataset):
     def _collect_all_shard(self, pre_dataset: Union[SingleItemType,
                                                     SingleItemTypeForContextAwareRec,
                                                     SingleItemTypeForSequentialRec]):
-        print("> in DFDataset, concat all single admission instances...")
         # 遍历，收集，拼成一个大的
         all_adm_interaction = []
         for sgl_adm_interaction in tqdm(pre_dataset, leave=False, ncols=80):
             all_adm_interaction.append(sgl_adm_interaction)
         self.dataframe = pd.concat(all_adm_interaction, axis=0)
-        print("> done!")
 
     def _get_preprocessed(self, name, split, item_type):
         data_folder = self._get_data_folder(name)

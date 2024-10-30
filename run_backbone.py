@@ -19,12 +19,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # following arguments are model settings
-    parser.add_argument("--gnn_type", default="GENConv")
-    parser.add_argument("--gnn_layer_num", type=int, default=3)
+    parser.add_argument("--gnn_type", default="GINEConv")
+    parser.add_argument("--gnn_layer_num", type=int, default=2)
     parser.add_argument("--num_encoder_layers", type=int, default=3)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--embedding_size", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr", type=float, default=0.0003)
 
     parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT,
                         help="path where dataset directory locates")  # in linux
@@ -86,7 +86,7 @@ if __name__ == '__main__':
             # TRAIN STAGE
             train_metric = d2l.Accumulator(2)  # train loss, iter num
             model.train()
-            train_loop = tqdm(enumerate(train_dataset), ncols=80, leave=False, total=len(train_dataset), ascii=True)
+            train_loop = tqdm(enumerate(train_dataset), ncols=100, leave=False, total=len(train_dataset), ascii=True)
             for i, hg in train_loop:
                 hg = hg.to(device)
                 logits, labels = model(hg)
@@ -146,7 +146,7 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for hg in tqdm(test_dataset, leave=False, ncols=80, total=len(test_dataset), ascii=True):
+            for hg in tqdm(test_dataset, leave=False, ncols=100, total=len(test_dataset), ascii=True):
                 hg = hg.to(device)
                 logits, labels = model(hg)
 
