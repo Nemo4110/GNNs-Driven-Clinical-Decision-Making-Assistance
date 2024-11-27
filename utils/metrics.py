@@ -1,4 +1,4 @@
-import sys
+import sys; sys.path.append('..')
 import pandas as pd
 import numpy as np
 import os
@@ -15,9 +15,7 @@ from sklearn.metrics import \
     recall_score, \
     average_precision_score
 from typing import List
-
-
-sys.path.append('..')
+from collections import defaultdict
 
 
 def flat_indices_to_voc_size(indices: List[int], voc_size, exclude_indices=None) -> np.ndarray:
@@ -154,3 +152,36 @@ def save_results(path_dir_results, results, ckpt_filename, notes):
     else:
         df_results = pd.DataFrame(new_row, index=[0])
     df_results.to_csv(result_file, index=False)
+
+
+def calc_gauc(results: pd.DataFrame, key: str):
+    assert key in results.columns
+    group_score = defaultdict(lambda: [])
+    group_truth = defaultdict(lambda: [])
+    for i, row in results.iterrows():
+        k = row[key]
+        score = row['score']
+        truth = row['label']
+        group_score[k].append(score)
+        group_truth[k].append(truth)
+
+    group_flag = defaultdict(lambda: False)
+    for k in results[key].unique():
+        truths = group_truth[k]
+        flag = False
+        for i in range(len(truths) - 1):
+            if truths[i] != truths[i + 1]:  # not all 1 or all 0, ok, break to next
+                flag = True
+                break
+        group_flag[k] = flag
+
+    impression_total = 0
+    total_auc = 0
+    for k in group_flag:
+        if group_flag[k]:
+            auc = roc_auc_score(np.asarray(group_truth[k]), np.asarray(group_score[k]))
+            total_auc += auc * len(group_truth[k])
+            impression_total += len(group_truth[k])
+    group_auc = float(total_auc) / impression_total
+    group_auc = round(group_auc, 4)
+    return group_auc
