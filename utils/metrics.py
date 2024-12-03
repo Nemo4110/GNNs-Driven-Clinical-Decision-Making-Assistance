@@ -125,6 +125,25 @@ def convert2df(logits: torch.tensor, labels: torch.tensor) -> pd.DataFrame:
     return pd.concat(each_day_collector, axis=0)
 
 
+def convert2df_v2(logits, labels, uid, iids) -> pd.DataFrame:
+    each_day_collector = []
+    for d, (y_hat, y, iid) in enumerate(zip(logits, labels, iids)):
+        y_hat = y_hat.sigmoid().cpu().tolist()
+        y = y.cpu().tolist()
+        iid = iid.cpu().tolist()
+
+        day = d + 1  # 因为是从住院的第二天开始预测的，以此偏移量为1
+        curr_day_df = pd.DataFrame({
+            'user_id': [uid] * len(y),
+            'item_id': iid,
+            'score': y_hat,
+            'label': y,
+            'day': [day] * len(y)
+        })
+        each_day_collector.append(curr_day_df)
+    return pd.concat(each_day_collector, axis=0)
+
+
 def calc_metrics(results):
     return {
         "rocauc":       roc_auc_score(results['label'].values, results['score'].values, average='macro'),
