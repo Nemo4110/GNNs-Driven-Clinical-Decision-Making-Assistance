@@ -109,7 +109,7 @@ def calculate_f1(row):
     return 2 * (prc * rec) / (prc + rec)
 
 
-def convert2df(logits: torch.tensor, labels: torch.tensor) -> pd.DataFrame:
+def convert2df(logits, labels) -> pd.DataFrame:
     each_day_collector = []
     for d, (y_hat, y) in enumerate(zip(logits, labels)):
         y_hat = y_hat.sigmoid().cpu().tolist()

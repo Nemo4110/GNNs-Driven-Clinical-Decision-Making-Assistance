@@ -270,9 +270,9 @@ class SourceDataFrames:
     def _train_val_test_split(self):
         adm_train_val, adm_test = train_test_split(self.adm_both, test_size=0.1, random_state=10043)
         adm_train, adm_val = train_test_split(adm_train_val, test_size=1. / 36, random_state=10043)
-        print(f"> total adm for training: {len(adm_train)}, "
-              f"validating: {len(adm_val)}, "
-              f"testing: {len(adm_test)}")
+        # print(f"> total adm for training: {len(adm_train)}, "
+        #       f"validating: {len(adm_val)}, "
+        #       f"testing: {len(adm_test)}")
         return adm_train, adm_val, adm_test
     
     def _prepare_mapping_for_token_type_fields(self):
