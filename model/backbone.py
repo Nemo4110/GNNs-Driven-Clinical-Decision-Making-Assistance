@@ -189,6 +189,7 @@ class BackBoneV2(nn.Module):
 
         logits = []
         labels = []
+        items = []
         for d, cur_day_hg in enumerate(total_hgs[1:]):  # 这里要扣除第一天，因为我们预测从第二天开始的序列
             pre_day_patient_conditions = patient_conditions[:, :d+1, :]  # 之前天的病情表示
             pre_day_item_feats_enc = item_feats_enc[self.goal][d, :, :]  # 前一天的物品emb
@@ -223,8 +224,9 @@ class BackBoneV2(nn.Module):
 
             logits.append(cur_day_logits)
             labels.append(cur_day_01_labels)
+            items.append(cur_day_seq_to_be_judged)
 
-        return logits, labels  # 按天收集
+        return logits, labels, items  # 按天收集
 
     def _get_cur_day_seq_to_be_judged_and_labels(self, hg):
         r"""获取当天需要判断的物品序列"""

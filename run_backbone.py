@@ -12,7 +12,7 @@ from dataset.unified import SourceDataFrames, OneAdmOneHG
 from model.backbone import BackBoneV2
 from utils.misc import get_latest_model_ckpt, EarlyStopper, init_seed
 from utils.config import HeteroGraphConfig, GNNConfig
-from utils.metrics import convert2df, save_results
+from utils.metrics import convert2df_v2, save_results
 
 
 if __name__ == '__main__':
@@ -89,7 +89,7 @@ if __name__ == '__main__':
             train_loop = tqdm(enumerate(train_dataset), ncols=100, leave=False, total=len(train_dataset), ascii=True)
             for i, hg in train_loop:
                 hg = hg.to(device)
-                logits, labels = model(hg)
+                logits, labels, _ = model(hg)
                 loss = BackBoneV2.get_loss(logits, labels)
                 train_metric.add(loss.detach().item(), 1)
 
@@ -146,12 +146,11 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             collector: List[pd.DataFrame] = []
-            for hg in tqdm(test_dataset, leave=False, ncols=100, total=len(test_dataset), ascii=True):
+            for i, hg in tqdm(enumerate(test_dataset), leave=False, ncols=100, total=len(test_dataset), ascii=True):
                 hg = hg.to(device)
-                logits, labels = model(hg)
+                logits, labels, iids = model(hg)
 
-                # 把预测结果全部收集成DataFrame，后面再单独写notebook/脚本进行细致的指标计算
-                collector.append(convert2df(logits, labels))
+                collector.append(convert2df_v2(logits, labels, i, iids))
 
         results: pd.DataFrame = pd.concat(collector, axis=0)
         save_results(args.path_dir_results, results, ckpt_filename, args.notes)
