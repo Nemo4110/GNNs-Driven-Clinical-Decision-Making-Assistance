@@ -8,11 +8,12 @@ from tqdm import tqdm
 from datetime import datetime, timedelta
 
 
-path_dataset = constant.PATH_MIMIC_III
-path_ddi_dataset = constant.PATH_DDI_DATA
-path_etl_output = constant.PATH_MIMIC_III_ETL_OUTPUT
+path_ddi_dataset = r"../dataset/ddi/"
+path_dataset = r"../data/mimic-iv-2.2/"
+path_etl_output = r"../data/mimic-iv-clinical-database-2.2/"
 
 df_admissions = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS.csv.gz"))
+df_admissions.columns = df_admissions.columns.str.upper()
 df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
 df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
 
@@ -30,13 +31,13 @@ def ndc0_mapping_handler(df_prescriptions):
 def duration_issuse_handler(df_prescriptions):
     interval_1day = timedelta(hours=24)
 
-    mask = (df_prescriptions.ENDDATE - df_prescriptions.STARTDATE) > interval_1day
+    mask = (df_prescriptions.STOPTIME - df_prescriptions.STARTTIME) > interval_1day
     df_duration_longer_than_1 = df_prescriptions.loc[mask].copy()
     df_duration_equal_to_1day = df_prescriptions.loc[~mask].copy()
 
     df_duration_longer_than_1 = df_duration_longer_than_1.reindex(
         df_duration_longer_than_1.index.repeat(
-            (df_duration_longer_than_1.ENDDATE - df_duration_longer_than_1.STARTDATE) / interval_1day
+            (df_duration_longer_than_1.STOPTIME - df_duration_longer_than_1.STARTTIME) / interval_1day
         )
     ).reset_index(drop=True)
 
@@ -48,12 +49,12 @@ def duration_issuse_handler(df_prescriptions):
         interval_1day = timedelta(hours=24)
 
         curr_idx = 0
-        curr_st = dfx.iloc[curr_idx].STARTDATE
+        curr_st = dfx.iloc[curr_idx].STARTTIME
         curr_et = curr_st + interval_1day
 
         while curr_idx < num_duration:
-            dfx["STARTDATE"].iloc[curr_idx] = curr_st
-            dfx["ENDDATE"].iloc[curr_idx] = curr_et
+            dfx["STARTTIME"].iloc[curr_idx] = curr_st
+            dfx["STOPTIME"].iloc[curr_idx] = curr_et
 
             curr_idx += 1
             curr_st += interval_1day
@@ -129,11 +130,11 @@ def adding_timestep_handler(df_prescriptions):
 
     def add_timestep_per_hadmid(df_grouped_by_hadmid: pd.DataFrame):
         interval_hour = 24  # chosen interval
-        df_grouped_by_hadmid = df_grouped_by_hadmid.sort_values(by=["STARTDATE", "ENDDATE"])
+        df_grouped_by_hadmid = df_grouped_by_hadmid.sort_values(by=["STARTTIME", "STOPTIME"])
 
         hadm_id = df_grouped_by_hadmid.HADM_ID.unique()[0]
         st = df_admissions[df_admissions.HADM_ID == hadm_id].ADMITTIME.iloc[0]
-        et = df_grouped_by_hadmid[df_grouped_by_hadmid.HADM_ID == hadm_id].ENDDATE.iloc[-1]
+        et = df_grouped_by_hadmid[df_grouped_by_hadmid.HADM_ID == hadm_id].STOPTIME.iloc[-1]
         # The end time of the prescription may be after the discharge time
 
         st = datetime.strptime(f"{st.year}-{st.month}-{st.day} {st.hour // interval_hour * interval_hour:2}:00:00", "%Y-%m-%d %H:%M:%S")
@@ -143,14 +144,14 @@ def adding_timestep_handler(df_prescriptions):
 
         dfx = df_grouped_by_hadmid.copy()
 
-        # filter out records whose `STARTDATE` are earlier than `ADMITTIME` which will cause `nan` issues
-        dfx = dfx[dfx.STARTDATE >= st]
+        # filter out records whose `STARTTIME` are earlier than `ADMITTIME` which will cause `nan` issues
+        dfx = dfx[dfx.STARTTIME >= st]
 
         dfx.insert(len(dfx.columns), "TIMESTEP", np.NaN)
 
         timestep = 0
         while st < et:
-            mask = (st <= dfx.STARTDATE) & (dfx.STARTDATE <= st + interval)
+            mask = (st <= dfx.STARTTIME) & (dfx.STARTTIME <= st + interval)
             if len(dfx.loc[mask]) > 0:
                 dfx.loc[mask, 'TIMESTEP'] = timestep
 
@@ -188,7 +189,7 @@ def repeating_edges_handler(df_prescriptions):
             for ndc_repeat in list(sr_ndc_repeat.index):
                 deprecate_entry_index = list(
                     df_curr_hadmid_curr_timestep[df_curr_hadmid_curr_timestep.NDC == ndc_repeat] \
-                    .sort_values(by=["STARTDATE", "ENDDATE"]) \
+                    .sort_values(by=["STARTTIME", "STOPTIME"]) \
                     .index[0:-1])
                 drop_indexs.extend(deprecate_entry_index)
         if len(drop_indexs) > 10000:
@@ -266,14 +267,16 @@ def drugs_node_features_handler(df_prescriptions_preprocessed: pd.DataFrame):
 
 if __name__ == "__main__":
     df_prescriptions = pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS.csv.gz"))
-    df_prescriptions["STARTDATE"] = pd.to_datetime(df_prescriptions["STARTDATE"], format="%Y-%m-%d %H:%M:%S")
-    df_prescriptions["ENDDATE"]   = pd.to_datetime(df_prescriptions["ENDDATE"],   format="%Y-%m-%d %H:%M:%S")
+    df_prescriptions.columns = df_prescriptions.columns.str.upper()
+    df_prescriptions['ROW_ID'] = df_prescriptions.index  # mimic-iv 2.2 没有row_id列
+    df_prescriptions["STARTTIME"] = pd.to_datetime(df_prescriptions["STARTTIME"], format="%Y-%m-%d %H:%M:%S")
+    df_prescriptions["STOPTIME"]   = pd.to_datetime(df_prescriptions["STOPTIME"],   format="%Y-%m-%d %H:%M:%S")
 
     # Handling of null values and outliers
-    df_prescriptions = df_prescriptions.loc[df_prescriptions.STARTDATE.notnull() &
-                                            df_prescriptions.ENDDATE.notnull()]
+    df_prescriptions = df_prescriptions.loc[df_prescriptions.STARTTIME.notnull() &
+                                            df_prescriptions.STOPTIME.notnull()]
     df_prescriptions = df_prescriptions[df_prescriptions.NDC.notnull()]
-    df_prescriptions = df_prescriptions.loc[df_prescriptions.STARTDATE < df_prescriptions.ENDDATE]
+    df_prescriptions = df_prescriptions.loc[df_prescriptions.STARTTIME < df_prescriptions.STOPTIME]
 
     # string columns
     df_prescriptions['DRUG']           = df_prescriptions['DRUG'          ].astype("string").str.lower()
