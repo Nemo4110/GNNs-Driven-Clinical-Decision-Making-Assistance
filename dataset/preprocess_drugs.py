@@ -12,7 +12,7 @@ path_ddi_dataset = r"../dataset/ddi/"
 path_dataset = r"../data/mimic-iv-2.2/"
 path_etl_output = r"../data/mimic-iv-clinical-database-2.2/"
 
-df_admissions = pd.read_csv(os.path.join(path_dataset, "ADMISSIONS.csv.gz"))
+df_admissions = pd.read_csv(os.path.join(path_dataset, "admissions.csv.gz"))
 df_admissions.columns = df_admissions.columns.str.upper()
 df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
 df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
@@ -266,7 +266,7 @@ def drugs_node_features_handler(df_prescriptions_preprocessed: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    df_prescriptions = pd.read_csv(os.path.join(path_dataset, "PRESCRIPTIONS.csv.gz"))
+    df_prescriptions = pd.read_csv(os.path.join(path_dataset, "prescriptions.csv.gz"))
     df_prescriptions.columns = df_prescriptions.columns.str.upper()
     df_prescriptions['ROW_ID'] = df_prescriptions.index  # mimic-iv 2.2 没有row_id列
     df_prescriptions["STARTTIME"] = pd.to_datetime(df_prescriptions["STARTTIME"], format="%Y-%m-%d %H:%M:%S")

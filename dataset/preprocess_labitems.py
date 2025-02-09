@@ -23,10 +23,11 @@ def preprocess_admission(src_csv_path, dst_csv_path, value_na=0):
                              'DISCHARGE_LOCATION',
                              'INSURANCE',
                              'LANGUAGE',
-                             'RELIGION',
                              'MARITAL_STATUS',
                              'RACE']
-    # TODO: unified.py 中需要将 ETHNICITY 改为 RACE
+    # TODO: unified.py 中需要
+    #  1) 将 ETHNICITY 改为 RACE
+    #  2) 删除 RELIGION
 
     for c in list_str_type_columns:
         m = df_admissions[c].value_counts()
@@ -229,12 +230,12 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 if __name__ == "__main__":
     path_dataset = r"/root/autodl-tmp/mimic-iv-2.2"
     path_dst_csv = r"/root/autodl-tmp/mimic-iv-clinical-database-2.2"
-    preprocess_admission(src_csv_path=path.join(path_dataset, "ADMISSIONS.csv.gz"),
+    preprocess_admission(src_csv_path=path.join(path_dataset, "admissions.csv.gz"),
                          dst_csv_path=path.join(path_dst_csv, "ADMISSIONS_NEW.csv.gz"))
 
-    preprocess_labitems(src_csv_path=path.join(path_dataset, "D_LABITEMS.csv.gz"),
+    preprocess_labitems(src_csv_path=path.join(path_dataset, "d_labitems.csv.gz"),
                         dst_csv_path=path.join(path_dst_csv, "D_LABITEMS_NEW.csv.gz"))
 
-    preprocess_labevents(src_csv_path=path.join(path_dataset, "LABEVENTS.csv.gz"),
+    preprocess_labevents(src_csv_path=path.join(path_dataset, "labevents.csv.gz"),
                          dst_csv_path=path.join(path_dst_csv, "LABEVENTS_PREPROCESSED.csv.gz"),
-                         src_csv_path_admi=path.join(path_dataset, "ADMISSIONS.csv.gz"))
+                         src_csv_path_admi=path.join(path_dataset, "admissions.csv.gz"))
