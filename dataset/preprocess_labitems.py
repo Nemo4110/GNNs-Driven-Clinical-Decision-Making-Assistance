@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 def preprocess_admission(src_csv_path, dst_csv_path, value_na=0):
     df_admissions = pd.read_csv(src_csv_path)
-
+    df_admissions.columns = df_admissions.columns.str.upper()
     df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
     df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
 
@@ -25,7 +25,8 @@ def preprocess_admission(src_csv_path, dst_csv_path, value_na=0):
                              'LANGUAGE',
                              'RELIGION',
                              'MARITAL_STATUS',
-                             'ETHNICITY']
+                             'RACE']
+    # TODO: unified.py 中需要将 ETHNICITY 改为 RACE
 
     for c in list_str_type_columns:
         m = df_admissions[c].value_counts()
@@ -41,7 +42,7 @@ def preprocess_admission(src_csv_path, dst_csv_path, value_na=0):
 
 def preprocess_labitems(src_csv_path, dst_csv_path, value_na=0):
     df_d_labitems = pd.read_csv(src_csv_path)
-
+    df_d_labitems.columns = df_d_labitems.columns.str.upper()
     list_str_type_columns = ['FLUID', 'CATEGORY']
     for c in list_str_type_columns:
         m = df_d_labitems[c].value_counts()
@@ -60,10 +61,14 @@ def preprocess_labitems(src_csv_path, dst_csv_path, value_na=0):
 def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na=0):
     # read csv files
     df_labevents = pd.read_csv(src_csv_path)
+    df_labevents.columns = df_labevents.columns.str.upper()
+    df_labevents['ROW_ID'] = df_labevents.index  # mimic-iv 2.2 没有row_id列
     df_labevents.dropna(subset=['HADM_ID', 'ITEMID'], inplace=True)
     df_labevents.sort_values(by=["HADM_ID", "ITEMID"], inplace=True)
     df_labevents["CHARTTIME"] = pd.to_datetime(df_labevents["CHARTTIME"], format="%Y-%m-%d %H:%M:%S")
+
     df_admissions = pd.read_csv(src_csv_path_admi)
+    df_admissions.columns = df_admissions.columns.str.upper()
     df_admissions["ADMITTIME"] = pd.to_datetime(df_admissions["ADMITTIME"], format="%Y-%m-%d %H:%M:%S")
     df_admissions["DISCHTIME"] = pd.to_datetime(df_admissions["DISCHTIME"], format="%Y-%m-%d %H:%M:%S")
 
@@ -222,8 +227,8 @@ def preprocess_labevents(src_csv_path, dst_csv_path, src_csv_path_admi, value_na
 
 
 if __name__ == "__main__":
-    path_dataset = constant.PATH_MIMIC_III
-    path_dst_csv = constant.PATH_MIMIC_III_ETL_OUTPUT
+    path_dataset = r"/root/autodl-tmp/mimic-iv-2.2"
+    path_dst_csv = r"/root/autodl-tmp/mimic-iv-clinical-database-2.2"
     preprocess_admission(src_csv_path=path.join(path_dataset, "ADMISSIONS.csv.gz"),
                          dst_csv_path=path.join(path_dst_csv, "ADMISSIONS_NEW.csv.gz"))
 
