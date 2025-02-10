@@ -372,7 +372,7 @@ class OneAdmOneHG(OneAdm):
         curr_id_df_pres = self.source_dfs.g_pres.get_group(id)
 
         curr_id_df_labe = curr_id_df_labe.sort_values(by=["TIMESTEP", "CHARTTIME", "ROW_ID"])
-        curr_id_df_pres = curr_id_df_pres.sort_values(by=["TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"])
+        curr_id_df_pres = curr_id_df_pres.sort_values(by=["TIMESTEP", "STARTTIME", "STOPTIME", "ROW_ID"])
 
         # --- get corr tensor shards ---
         # nodes
@@ -541,10 +541,10 @@ class SingleItemType(OneAdm):
             self.item_feat_values = self.source_dfs.feat_items
         elif self.item_type == "drug":
             self.interaction = self.source_dfs.df_prescriptions.copy()
-            self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTDATE", "ENDDATE", "ROW_ID"], inplace=True)
+            self.interaction.sort_values(by=["HADM_ID", "TIMESTEP", "STARTTIME", "STOPTIME", "ROW_ID"], inplace=True)
             self.interaction = self._prep_interaction(
                 self.interaction,
-                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'ICUSTAY_ID', 'STARTDATE', 'ENDDATE', 'DRUG', 'DRUG_NAME_POE', 'DRUG_NAME_GENERIC', 'FORMULARY_DRUG_CD', 'GSN'] + list_selected_prescriptions_columns,
+                cols_to_drop=['ROW_ID', 'SUBJECT_ID', 'ICUSTAY_ID', 'STARTTIME', 'STOPTIME', 'DRUG', 'DRUG_NAME_POE', 'DRUG_NAME_GENERIC', 'FORMULARY_DRUG_CD', 'GSN'] + list_selected_prescriptions_columns,
                 cols_to_remap={
                     'HADM_ID': self.source_dfs.tokenfields2mappedid['HADM_ID'],
                     'NDC':     self.source_dfs.tokenfields2mappedid['NDC'],
