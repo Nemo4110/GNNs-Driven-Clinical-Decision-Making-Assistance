@@ -27,9 +27,8 @@ list_selected_admission_columns = [
     'DISCHARGE_LOCATION',
     'INSURANCE',
     'LANGUAGE',
-    'RELIGION',
     'MARITAL_STATUS',
-    'ETHNICITY'
+    'RACE'
 ]
 list_selected_labitems_columns = ['FLUID', 'CATEGORY']
 list_selected_drug_ndc_columns = [
@@ -72,9 +71,8 @@ field2type = {
     'DISCHARGE_LOCATION': FeatureType.TOKEN,
     'INSURANCE':      FeatureType.TOKEN,
     'LANGUAGE':       FeatureType.TOKEN,
-    'RELIGION':       FeatureType.TOKEN,
     'MARITAL_STATUS': FeatureType.TOKEN,
-    'ETHNICITY':      FeatureType.TOKEN,
+    'RACE':           FeatureType.TOKEN,
 
     # 检验item
     'FLUID': FeatureType.TOKEN,
@@ -122,9 +120,8 @@ field2source = {
     'DISCHARGE_LOCATION': FeatureSource.USER,
     'INSURANCE':      FeatureSource.USER,
     'LANGUAGE':       FeatureSource.USER,
-    'RELIGION':       FeatureSource.USER,
     'MARITAL_STATUS': FeatureSource.USER,
-    'ETHNICITY':      FeatureSource.USER,
+    'RACE':           FeatureSource.USER,
 
     # 检验item
     'FLUID': FeatureSource.ITEM,
@@ -164,9 +161,8 @@ field2dtype = {
     'DISCHARGE_LOCATION': 'int64',
     'INSURANCE':          'int64',
     'LANGUAGE':           'int64',
-    'RELIGION':           'int64',
     'MARITAL_STATUS':     'int64',
-    'ETHNICITY':          'int64',
+    'RACE':               'int64',
 
     # df_labitems
     'LABEL':    'string',
@@ -203,9 +199,10 @@ class SourceDataFrames:
         # 读取etl处理后的数据
         self.df_admissions    = pd.read_csv(os.path.join(self.path_etl_output, "ADMISSIONS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
         self.df_labitems      = pd.read_csv(os.path.join(self.path_etl_output, "D_LABITEMS_NEW.csv.gz"),             index_col=0, dtype=field2dtype)
+        self.df_drug_ndc_feat = pd.read_csv(os.path.join(self.path_etl_output, "DRUGS_NDC_FEAT.csv.gz"),             index_col=0, dtype=field2dtype)
+
         self.df_labevents     = pd.read_csv(os.path.join(self.path_etl_output, "LABEVENTS_PREPROCESSED.csv.gz"),     index_col=0, dtype=field2dtype)
         self.df_prescriptions = pd.read_csv(os.path.join(self.path_etl_output, "PRESCRIPTIONS_PREPROCESSED.csv.gz"), index_col=0, dtype=field2dtype)
-        self.df_drug_ndc_feat = pd.read_csv(os.path.join(self.path_etl_output, "DRUGS_NDC_FEAT.csv.gz"),             index_col=0, dtype=field2dtype)
 
         # 截断一下最大值最小值
         self.df_labevents['VALUENUM_Z-SCORED'] = self.df_labevents['VALUENUM_Z-SCORED'].clip(lower=-100., upper=100.)
@@ -263,16 +260,16 @@ class SourceDataFrames:
 
         both = list(set.intersection(adm_l, adm_p))
         both = list(map(int, both))
-        # print(f"> total adm whose length > 1: {len(both)}")
+        print(f"> total adm whose length > 1: {len(both)}")
 
         return both
 
     def _train_val_test_split(self):
         adm_train_val, adm_test = train_test_split(self.adm_both, test_size=0.1, random_state=10043)
-        adm_train, adm_val = train_test_split(adm_train_val, test_size=1. / 36, random_state=10043)
-        # print(f"> total adm for training: {len(adm_train)}, "
-        #       f"validating: {len(adm_val)}, "
-        #       f"testing: {len(adm_test)}")
+        adm_train, adm_val = train_test_split(adm_train_val, test_size=1. / 72, random_state=10043)
+        print(f"> total adm for training: {len(adm_train)}, "
+              f"validating: {len(adm_val)}, "
+              f"testing: {len(adm_test)}")
         return adm_train, adm_val, adm_test
     
     def _prepare_mapping_for_token_type_fields(self):
@@ -849,11 +846,9 @@ def string2list(row_value):
 
 
 if __name__ == '__main__':
-    sources_dfs = SourceDataFrames(r"..\data\mimic-iii-clinical-database-1.4")
-    pre_dataset = SingleItemTypeForContextAwareRec(sources_dfs, "val", "labitem")
-    itr_dataset = DFDataset(pre_dataset)
-    itr_dataloader = torchdata.DataLoader(
-        itr_dataset, batch_size=256, shuffle=False, pin_memory=True, collate_fn=DFDataset.collect_fn)
-    for interaction in itr_dataloader:
-        print(interaction)
-        break
+    # sources_dfs = SourceDataFrames(r"../data/mimic-iv-clinical-database-2.2")
+    sources_dfs = SourceDataFrames(r"/root/autodl-tmp/mimic-iv-clinical-database-2.2")
+    dataset = OneAdmOneHG(sources_dfs, "val")
+    for hg in tqdm(dataset, total=len(dataset), ncols=100, ascii=True):
+        print(hg)
+        pass

@@ -5,11 +5,11 @@ from typing import List, Tuple, Dict
 @dataclass
 class MappingManager:
     node_type_to_node_num = {
-        "labitem": 753,
-        "drug": 4294
+        "labitem": 1622,
+        "drug": 5967,
     }
     node_type_to_node_feat_dim_in = {
-        "admission": 8,
+        "admission": 7,
         "labitem": 2,
         "drug": 8
     }

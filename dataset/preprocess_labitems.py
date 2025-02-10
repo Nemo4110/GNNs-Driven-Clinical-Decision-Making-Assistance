@@ -25,9 +25,6 @@ def preprocess_admission(src_csv_path, dst_csv_path, value_na=0):
                              'LANGUAGE',
                              'MARITAL_STATUS',
                              'RACE']
-    # TODO: unified.py 中需要
-    #  1) 将 ETHNICITY 改为 RACE
-    #  2) 删除 RELIGION
 
     for c in list_str_type_columns:
         m = df_admissions[c].value_counts()
