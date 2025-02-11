@@ -21,12 +21,11 @@ if __name__ == '__main__':
     # following arguments are model settings
     parser.add_argument("--gnn_type", default="GINEConv")
     parser.add_argument("--gnn_layer_num", type=int, default=2)
-    parser.add_argument("--num_encoder_layers", type=int, default=3)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--embedding_size", type=int, default=10)
     parser.add_argument("--lr", type=float, default=0.0003)
 
-    parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_III_ETL_OUTPUT,
+    parser.add_argument("--root_path_dataset", default=constant.PATH_MIMIC_IV_ETL_OUTPUT,
                         help="path where dataset directory locates")  # in linux
     parser.add_argument("--path_dir_model_hub", default=r"./model/hub", help="path where models save")
     parser.add_argument("--path_dir_results", default=r"./results", help="path where results save")
@@ -42,8 +41,8 @@ if __name__ == '__main__':
     parser.add_argument("--is_gnn_only", action="store_true", default=False, help="whether to only use GNN")
 
     parser.add_argument("--train", action="store_true", default=False)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--epochs", type=int, default=3)  # mimic-iv 训一个epoch大约要8小时
+    parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--accumulation_steps", type=int, default=16)
 
     parser.add_argument("--test", action="store_true", default=False)
@@ -64,7 +63,7 @@ if __name__ == '__main__':
         node_types, edge_types = HeteroGraphConfig.use_one_edge_type(item_type=args.item_type)
     gnn_conf = GNNConfig(args.gnn_type, args.gnn_layer_num, node_types, edge_types)
     model = BackBoneV2(sources_dfs, args.goal, args.hidden_dim, gnn_conf, device,
-                       args.num_encoder_layers, args.embedding_size, args.is_gnn_only,
+                       args.embedding_size, args.is_gnn_only,
                        init_method=args.init_method,).to(device)
 
     os.makedirs(args.path_dir_model_hub, exist_ok=True)
@@ -105,7 +104,7 @@ if __name__ == '__main__':
                     optimizer.zero_grad()
 
                 # VALID STAGE
-                if i > 0 and i % (len(train_dataset) // 10) == 0:  # 每遍历完训练集的10%
+                if epoch != 0 and i > 0 and i % (len(train_dataset) // 10) == 0:  # 每遍历完训练集的10%
                     model.eval()
                     valid_metric = d2l.Accumulator(2)
                     with torch.no_grad():

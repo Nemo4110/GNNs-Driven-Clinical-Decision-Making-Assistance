@@ -27,7 +27,6 @@ class BackBoneV2(nn.Module):
                  h_dim: int,
                  gnn_conf: GNNConfig,
                  device,
-                 num_enc_layers: int = 6,
                  embedding_size: int = 10,
                  is_gnn_only: bool = False,
                  init_method: str = "xavier_normal",

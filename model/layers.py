@@ -445,7 +445,7 @@ class BaseEmbeddingLayer(nn.Module):
         # user
         if len(self.user_token_field_dims) > 0:
             self.user_token_field_offsets = np.array(
-                (0, *np.cumsum(self.user_token_field_dims)[:-1]), dtype=np.long)
+                (0, *np.cumsum(self.user_token_field_dims)[:-1]), dtype=np.int64)
             self.user_token_embedding_table = FMEmbedding(
                 self.user_token_field_dims,
                 self.user_token_field_offsets,
@@ -456,7 +456,7 @@ class BaseEmbeddingLayer(nn.Module):
         # item
         if len(self.item_token_field_dims) > 0:
             self.item_token_field_offsets = np.array(
-                (0, *np.cumsum(self.item_token_field_dims)[:-1]), dtype=np.long)
+                (0, *np.cumsum(self.item_token_field_dims)[:-1]), dtype=np.int64)
             self.item_token_embedding_table = FMEmbedding(
                 self.item_token_field_dims,
                 self.item_token_field_offsets,
@@ -613,7 +613,7 @@ class ContextEmbeddingLayer(BaseEmbeddingLayer):
         # 给token fields 加偏移，这样便于放到一个统一的embedding_table中
         if len(self.token_field_dims) > 0:
             self.token_field_offsets = np.array(
-                (0, *np.cumsum(self.token_field_dims)[:-1]), dtype=np.long)
+                (0, *np.cumsum(self.token_field_dims)[:-1]), dtype=np.int64)
             self.token_embedding_table = FMEmbedding(
                 self.token_field_dims, self.token_field_offsets, self.embedding_size)
 
@@ -798,7 +798,7 @@ class GraphEmbeddingLayer(nn.Module):
         # get embedding tables
         if len(self.token_field_dims) > 0:
             self.token_field_offsets = np.array(
-                (0, *np.cumsum(self.token_field_dims)[:-1]), dtype=np.long)
+                (0, *np.cumsum(self.token_field_dims)[:-1]), dtype=np.int64)
             self.token_embedding_table = FMEmbedding(
                 self.token_field_dims,
                 self.token_field_offsets,
