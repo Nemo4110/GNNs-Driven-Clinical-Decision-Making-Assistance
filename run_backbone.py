@@ -108,18 +108,19 @@ if __name__ == '__main__':
                 if i > 0 and i % (len(train_dataset) // 10) == 0:  # 每遍历完训练集的10%
                     model.eval()
                     valid_metric = d2l.Accumulator(2)
-                    with torch.no_grad():
-                        for hg in valid_dataset:
-                            hg = hg.to(device)
-                            logits, labels = model(hg)
-                            validloss = BackBoneV2.get_loss(logits, labels)
-                            valid_metric.add(validloss.item(), 1)
+                    for hg in valid_dataset:
+                        hg = hg.to(device)
+                        with torch.no_grad():
+                            logits, labels, _ = model(hg)
 
-                            train_loop.set_description_str(f"E#{epoch:02}VLD")
-                            train_loop.set_postfix_str(f'loss:{validloss.item():.3f}, avg:{valid_metric[0] / valid_metric[1]:.3f}')
+                        validloss = BackBoneV2.get_loss(logits, labels)
+                        valid_metric.add(validloss.detach().item(), 1)
+                        train_loop.set_description_str(f"E#{epoch:02}VLD")
+                        train_loop.set_postfix_str(f'loss:{validloss.detach().item():.3f}, avg:{valid_metric[0] / valid_metric[1]:.3f}')
 
                     early_stopper(score=valid_metric[0] / valid_metric[1], model=model)
                     model.train()  # 验证完了，返回训练模式
+
                 if early_stopper.is_stop: break
             if early_stopper.is_stop: break
 
@@ -144,13 +145,12 @@ if __name__ == '__main__':
             ckpt_filename = model_name
 
         model.eval()
-        with torch.no_grad():
-            collector: List[pd.DataFrame] = []
-            for i, hg in tqdm(enumerate(test_dataset), leave=False, ncols=100, total=len(test_dataset), ascii=True):
-                hg = hg.to(device)
+        collector: List[pd.DataFrame] = []
+        for i, hg in tqdm(enumerate(test_dataset), leave=False, ncols=100, total=len(test_dataset), ascii=True):
+            hg = hg.to(device)
+            with torch.no_grad():
                 logits, labels, iids = model(hg)
-
-                collector.append(convert2df_v2(logits, labels, i, iids))
+            collector.append(convert2df_v2(logits, labels, i, iids))
 
         results: pd.DataFrame = pd.concat(collector, axis=0)
         save_results(args.path_dir_results, results, ckpt_filename, args.notes)
